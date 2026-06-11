@@ -1,0 +1,10 @@
+404: Not Foundbuild/
+.dart_tool/
+.gradle/
+*.iml
+.DS_Store
+build/
+.idea/
+.metadata
+.flutter-plugins-dependencies
+*.dill

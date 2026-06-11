@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "64934222857",
+    "project_id": "zenith-budget-79152",
+    "storage_bucket": "zenith-budget-79152.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:64934222857:android:5945e9753fdb8a64f4acd8",
+        "android_client_info": {
+          "package_name": "com.zenith.zenith_budget"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "64934222857-tjhcs0k6qcfojn1v7dt9fu8p6rlpcnq1.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.zenith.zenith_budget",
+            "certificate_hash": "2faa398945bb8983c019f096964b0253b2ae8db5"
+          }
+        },
+        {
+          "client_id": "64934222857-fsrl032bjf2br5ed1svk3o423iv6el6m.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCC6Pw7ackpIKbUV52wUMlKQ1115wQCVMM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "64934222857-fsrl032bjf2br5ed1svk3o423iv6el6m.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
