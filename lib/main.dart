@@ -275,16 +275,17 @@ class _TrendPainter extends CustomPainter {
 
 Widget _tile(Txn t, ColorScheme cs, {VoidCallback? onTap}) {
   final c = fCat(t.category); final isI = t.type == 'income';
-  return GestureDetector(onTap: onTap, child: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 3), padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface, border: Border.all(color: cs.outline.withOpacity(0.06))),
+  return GestureDetector(onTap: onTap, child: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
     child: Row(children: [
-      Container(width: 40, height: 40, decoration: BoxDecoration(borderRadius: BorderRadius.circular(11), color: (c?.color ?? const Color(0xFF64748B)).withOpacity(0.12)), child: Center(child: Text(c?.icon ?? '📌', style: const TextStyle(fontSize: 18)))),
-      const SizedBox(width: 11),
+      Container(width: 44, height: 44, decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: (c?.color ?? const Color(0xFF64748B)).withOpacity(0.12)), child: Center(child: Text(c?.icon ?? '📌', style: const TextStyle(fontSize: 20)))),
+      const SizedBox(width: 12),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(t.merchant, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface)),
-        Text('${c?.name ?? "Other"} · ${DateFormat.jm().format(t.date)}', style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.4))),
-        if (t.note.isNotEmpty) Text(t.note, style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.3), fontStyle: FontStyle.italic), maxLines: 1, overflow: TextOverflow.ellipsis)])),
-      Text(isI ? '+${fmtAmt(t.amount)}' : '-${fmtAmt(t.amount)}', style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: isI ? const Color(0xFF22C55E) : cs.onSurface))])));
+        Text(t.merchant, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
+        const SizedBox(height: 2),
+        Text('${c?.name ?? "Other"} · ${DateFormat.jm().format(t.date)}', style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.4))),
+        if (t.note.isNotEmpty) Text(t.note, style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.3), fontStyle: FontStyle.italic), maxLines: 1, overflow: TextOverflow.ellipsis)])),
+      Text(isI ? '+${fmtAmt(t.amount)}' : '-${fmtAmt(t.amount)}', style: GoogleFonts.jetBrainsMono(fontSize: 14, fontWeight: FontWeight.w700, color: isI ? const Color(0xFF22C55E) : cs.onSurface))])));
 }
 
 List<Widget> _grouped(List<Txn> txns, ColorScheme cs, ValueChanged<Txn> onTap, {int limit = 20}) {
@@ -292,7 +293,7 @@ List<Widget> _grouped(List<Txn> txns, ColorScheme cs, ValueChanged<Txn> onTap, {
   for (final t in txns.take(limit)) {
     final d = DateFormat('EEEE, d MMM').format(t.date);
     if (d != last) { last = d; final l = DateUtils.isSameDay(t.date, DateTime.now()) ? 'Today' : DateUtils.isSameDay(t.date, DateTime.now().subtract(const Duration(days: 1))) ? 'Yesterday' : d;
-      w.add(Padding(padding: const EdgeInsets.fromLTRB(18, 14, 18, 4), child: Text(l, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: cs.onSurface.withOpacity(0.4))))); }
+      w.add(Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 6), child: Text(l, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.45))))); }
     w.add(_tile(t, cs, onTap: () => onTap(t))); }
   return w;
 }
@@ -318,31 +319,31 @@ class _Home extends StatelessWidget {
     final pie = cats.map((c) => MapEntry(c, txns.where((t) => t.type == 'expense' && t.category == c.id).fold(0.0, (s, t) => s + t.amount))).where((e) => e.value > 0).toList()..sort((a, b) => b.value.compareTo(a.value));
 
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
-      Padding(padding: const EdgeInsets.fromLTRB(18, 14, 18, 0), child: Text('Hi, $name 👋', style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.w800, color: cs.onSurface))),
+      Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 0), child: Text('Hi, $name 👋', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
       if (!notifOk) GestureDetector(onTap: onNotif, child: Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(10), decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), color: const Color(0xFFF43F5E).withOpacity(0.08)),
         child: Row(children: [const Icon(Icons.notifications_active_rounded, color: Color(0xFFF43F5E), size: 18), const SizedBox(width: 8), Expanded(child: Text('Enable GPay auto-detection', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: cs.onSurface)))]))),
       GestureDetector(onTap: onEditBud, child: Container(margin: const EdgeInsets.fromLTRB(16, 12, 16, 0), padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), gradient: LinearGradient(colors: [accent.withOpacity(0.12), Colors.purple.withOpacity(0.06)]), border: Border.all(color: accent.withOpacity(0.25))),
+        decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), gradient: LinearGradient(colors: [accent.withOpacity(0.12), Colors.purple.withOpacity(0.06)])),
         child: monthBud > 0
           ? Row(children: [
               SizedBox(width: 100, height: 100, child: TweenAnimationBuilder<double>(tween: Tween(begin: 0, end: pct), duration: const Duration(milliseconds: 1200), curve: Curves.easeOutCubic,
                 builder: (_, v, __) => Stack(alignment: Alignment.center, children: [SizedBox(width: 100, height: 100, child: CircularProgressIndicator(value: v, strokeWidth: 8, strokeCap: StrokeCap.round, backgroundColor: cs.outline.withOpacity(0.08), valueColor: AlwaysStoppedAnimation(v > 0.9 ? const Color(0xFFF43F5E) : accent))),
-                  Column(mainAxisSize: MainAxisSize.min, children: [Text('${(v * 100).round()}%', style: GoogleFonts.jetBrainsMono(fontSize: 18, fontWeight: FontWeight.w800, color: cs.onSurface)), Text('used', style: TextStyle(fontSize: 9, color: cs.onSurface.withOpacity(0.4)))])]))),
+                  Column(mainAxisSize: MainAxisSize.min, children: [Text('${(v * 100).round()}%', style: GoogleFonts.jetBrainsMono(fontSize: 22, fontWeight: FontWeight.w800, color: cs.onSurface)), Text('used', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4)))])]))),
               const SizedBox(width: 16),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('MONTHLY BUDGET', style: TextStyle(fontSize: 9, color: cs.onSurface.withOpacity(0.4), letterSpacing: 1.5, fontWeight: FontWeight.w600)),
-                Text(fmtInt(monthBud), style: GoogleFonts.jetBrainsMono(fontSize: 24, fontWeight: FontWeight.w900, color: accent)),
+                Text('MONTHLY BUDGET', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4), letterSpacing: 1.5, fontWeight: FontWeight.w600)),
+                Text(fmtInt(monthBud), style: GoogleFonts.jetBrainsMono(fontSize: 22, fontWeight: FontWeight.w900, color: accent)),
                 const SizedBox(height: 6),
                 _kv('Spent', fmtAmt(tExp), const Color(0xFFF43F5E), cs),
                 _kv('Left', fmtAmt((monthBud - tExp).clamp(0, double.infinity)), const Color(0xFF22C55E), cs)]))])
           : Center(child: Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Column(children: [Text('Set your monthly budget', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: cs.onSurface)), const SizedBox(height: 4), Text('Tap here to get started', style: TextStyle(fontSize: 12, color: accent))]))))),
-      Container(margin: const EdgeInsets.fromLTRB(16, 8, 16, 0), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: cs.surface, border: Border.all(color: cs.outline.withOpacity(0.06))),
+      Container(margin: const EdgeInsets.fromLTRB(16, 8, 16, 0), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: cs.surface),
         child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Balance', style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.4))), Text(fmtAmt(bal), style: GoogleFonts.jetBrainsMono(fontSize: 16, fontWeight: FontWeight.w800, color: bal >= 0 ? cs.onSurface : const Color(0xFFF43F5E)))]),
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Balance', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))), Text(fmtAmt(bal), style: GoogleFonts.jetBrainsMono(fontSize: 22, fontWeight: FontWeight.w800, color: bal >= 0 ? cs.onSurface : const Color(0xFFF43F5E)))]),
           Row(children: [_ms('In', '+${fmtAmt(tInc)}', const Color(0xFF22C55E), cs), const SizedBox(width: 14), _ms('Out', '-${fmtAmt(tExp)}', const Color(0xFFF43F5E), cs)])])),
-      Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface, border: Border.all(color: cs.outline.withOpacity(0.06))),
+      Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('${DateFormat('MMMM').format(now)} spending', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: cs.onSurface)),
+          Text('${DateFormat('MMMM').format(now)} spending', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
           const SizedBox(height: 8),
           Wrap(spacing: 4, runSpacing: 4, children: List.generate(dim, (i) {
             final day = i + 1; final amt = dayAmt[day] ?? 0; final isToday = day == now.day; final isFuture = day > now.day;
@@ -352,31 +353,31 @@ class _Home extends StatelessWidget {
               border: isToday ? Border.all(color: accent, width: 1.5) : null),
               child: Center(child: Text('$day', style: TextStyle(fontSize: 8, fontWeight: FontWeight.w600, color: amt > 0 && !isFuture ? (intensity > 0.5 ? Colors.white : cs.onSurface) : cs.onSurface.withOpacity(isFuture ? 0.15 : 0.3)))));
           }))])),
-      if (cum.length > 1) Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.fromLTRB(14, 14, 14, 20), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface, border: Border.all(color: cs.outline.withOpacity(0.06))),
+      if (cum.length > 1) Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.fromLTRB(14, 14, 14, 20), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('Spending trend', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: cs.onSurface)),
-            Text(fmtAmt(r), style: GoogleFonts.jetBrainsMono(fontSize: 11, fontWeight: FontWeight.w700, color: const Color(0xFFF43F5E)))]),
-          Text('Day 1 → Day ${now.day}', style: TextStyle(fontSize: 9, color: cs.onSurface.withOpacity(0.3))),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('Spending trend', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
+            Text(fmtAmt(r), style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: const Color(0xFFF43F5E)))]),
+          Text('Day 1 → Day ${now.day}', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.3))),
           const SizedBox(height: 10),
           SizedBox(height: 90, child: CustomPaint(size: const Size(double.infinity, 90), painter: _TrendPainter(cum, accent)))])),
-      if (pie.isNotEmpty) Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface, border: Border.all(color: cs.outline.withOpacity(0.06))),
+      if (pie.isNotEmpty) Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Where your money goes', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: cs.onSurface)), const SizedBox(height: 10),
+          Text('Where your money goes', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)), const SizedBox(height: 10),
           Row(children: [SizedBox(width: 100, height: 100, child: CustomPaint(painter: _PiePainter(pie, tExp, Theme.of(context).scaffoldBackgroundColor))),
             const SizedBox(width: 14),
             Expanded(child: Column(children: pie.take(5).map((e) { final p = tExp > 0 ? (e.value / tExp * 100).round() : 0;
               return Padding(padding: const EdgeInsets.only(bottom: 4), child: Row(children: [Container(width: 8, height: 8, decoration: BoxDecoration(borderRadius: BorderRadius.circular(2), color: e.key.color)), const SizedBox(width: 6),
                 Expanded(child: Text('${e.key.icon} ${e.key.name}', style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.6)))),
                 Text('$p%', style: GoogleFonts.jetBrainsMono(fontSize: 10, fontWeight: FontWeight.w700, color: e.key.color))])); }).toList()))])])),
-      if (txns.isNotEmpty) Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(12), decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: accent.withOpacity(0.06), border: Border.all(color: accent.withOpacity(0.12))),
+      if (txns.isNotEmpty) Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(12), decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: accent.withOpacity(0.06)),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('💡', style: TextStyle(fontSize: 14)), const SizedBox(width: 8), Expanded(child: Text(_ins(), style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.65), height: 1.4)))])),
       ..._grouped(txns, cs, onTap, limit: 20),
       if (txns.isEmpty) Padding(padding: const EdgeInsets.all(32), child: Center(child: Text('No transactions yet.\nMake a payment to get started!', textAlign: TextAlign.center, style: TextStyle(color: cs.onSurface.withOpacity(0.35))))),
     ]));
   }
 
-  Widget _kv(String l, String v, Color c, ColorScheme cs) => Padding(padding: const EdgeInsets.only(bottom: 2), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(l, style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))), Text(v, style: GoogleFonts.jetBrainsMono(fontSize: 12, fontWeight: FontWeight.w700, color: c))]));
-  Widget _ms(String l, String v, Color c, ColorScheme cs) => Column(crossAxisAlignment: CrossAxisAlignment.end, children: [Text(l, style: TextStyle(fontSize: 9, color: cs.onSurface.withOpacity(0.35))), Text(v, style: GoogleFonts.jetBrainsMono(fontSize: 11, fontWeight: FontWeight.w700, color: c))]);
+  Widget _kv(String l, String v, Color c, ColorScheme cs) => Padding(padding: const EdgeInsets.only(bottom: 2), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(l, style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))), Text(v, style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: c))]));
+  Widget _ms(String l, String v, Color c, ColorScheme cs) => Column(crossAxisAlignment: CrossAxisAlignment.end, children: [Text(l, style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.35))), Text(v, style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: c))]);
   String _ins() {
     final now = DateTime.now(); final dp = now.day; final dl = DateUtils.getDaysInMonth(now.year, now.month) - dp;
     final da = dp > 0 && tExp > 0 ? tExp / dp : 0.0;
@@ -397,8 +398,8 @@ class _Activity extends StatelessWidget {
   const _Activity({required this.txns, required this.onTap});
   @override Widget build(BuildContext context) { final cs = Theme.of(context).colorScheme;
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
-      Padding(padding: const EdgeInsets.fromLTRB(18, 16, 18, 4), child: Text('Activity', style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.w800, color: cs.onSurface))),
-      Padding(padding: const EdgeInsets.fromLTRB(18, 0, 18, 8), child: Text('${txns.length} transactions', style: TextStyle(fontSize: 12, color: cs.onSurface.withOpacity(0.4)))),
+      Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 4), child: Text('Activity', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
+      Padding(padding: const EdgeInsets.fromLTRB(20, 0, 20, 8), child: Text('${txns.length} transaction${txns.length == 1 ? '' : 's'}', style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.4)))),
       ..._grouped(txns, cs, onTap, limit: 200)]));
   }
 }
@@ -410,21 +411,21 @@ class _BudgetsTab extends StatelessWidget {
   const _BudgetsTab({required this.txns, required this.catB, required this.monthBud, required this.accent, required this.onEditTotal, required this.onEditCat});
   @override Widget build(BuildContext context) { final cs = Theme.of(context).colorScheme;
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
-      Padding(padding: const EdgeInsets.fromLTRB(18, 16, 18, 14), child: Text('Budgets', style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.w800, color: cs.onSurface))),
-      GestureDetector(onTap: onEditTotal, child: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), gradient: LinearGradient(colors: [accent.withOpacity(0.1), Colors.purple.withOpacity(0.05)]), border: Border.all(color: accent.withOpacity(0.2))),
+      Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 14), child: Text('Budgets', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
+      GestureDetector(onTap: onEditTotal, child: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), gradient: LinearGradient(colors: [accent.withOpacity(0.1), Colors.purple.withOpacity(0.05)])),
         child: Row(children: [const Text('💰', style: TextStyle(fontSize: 24)), const SizedBox(width: 12),
-          Expanded(child: Text('Monthly Budget', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: cs.onSurface))),
+          Expanded(child: Text('Monthly Budget', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface))),
           Text(monthBud > 0 ? fmtInt(monthBud) : 'Not set', style: GoogleFonts.jetBrainsMono(fontSize: 16, fontWeight: FontWeight.w700, color: monthBud > 0 ? accent : cs.onSurface.withOpacity(0.3))),
           const SizedBox(width: 6), Icon(Icons.edit_rounded, size: 16, color: cs.onSurface.withOpacity(0.3))]))),
       const SizedBox(height: 8),
       Padding(padding: const EdgeInsets.fromLTRB(18, 4, 18, 8), child: Text('Category budgets (optional — tap to set)', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.35)))),
       ...cats.map((cat) { final bud = catB[cat.id] ?? 0; final spent = txns.where((t) => t.type == 'expense' && t.category == cat.id).fold(0.0, (s, t) => s + t.amount); final pct = bud > 0 ? (spent / bud).clamp(0.0, 1.0) : 0.0;
         return GestureDetector(onTap: () => onEditCat(cat.id), child: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 3), padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface, border: Border.all(color: cs.outline.withOpacity(0.06))),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
           child: Column(children: [Row(children: [Text(cat.icon, style: const TextStyle(fontSize: 20)), const SizedBox(width: 10),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(cat.name, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface)),
-              Text(bud > 0 ? '${fmtAmt(spent)} / ${fmtInt(bud)}' : spent > 0 ? fmtAmt(spent) : 'No budget set', style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.4)))])),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(cat.name, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
+              Text(bud > 0 ? '${fmtAmt(spent)} / ${fmtInt(bud)}' : spent > 0 ? fmtAmt(spent) : 'No budget set', style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.4)))])),
             bud > 0 ? Text(spent > bud ? 'Over!' : '${fmtAmt(bud - spent)} left', style: GoogleFonts.jetBrainsMono(fontSize: 11, fontWeight: FontWeight.w700, color: spent > bud ? const Color(0xFFF43F5E) : const Color(0xFF22C55E))) : Icon(Icons.add_rounded, size: 18, color: cs.onSurface.withOpacity(0.2))]),
             if (bud > 0) ...[const SizedBox(height: 8), ClipRRect(borderRadius: BorderRadius.circular(3), child: LinearProgressIndicator(value: pct, minHeight: 5, backgroundColor: cs.outline.withOpacity(0.1), valueColor: AlwaysStoppedAnimation(pct > 0.9 ? const Color(0xFFF43F5E) : cat.color)))]]))); })]));
   }
@@ -445,19 +446,19 @@ class _StatsTab extends StatelessWidget {
     final pie = cats.map((c) => MapEntry(c, txns.where((t) => t.type == 'expense' && t.category == c.id).fold(0.0, (s, t) => s + t.amount))).where((e) => e.value > 0).toList()..sort((a, b) => b.value.compareTo(a.value));
 
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
-      Padding(padding: const EdgeInsets.fromLTRB(18, 16, 18, 14), child: Text('Analytics', style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.w800, color: cs.onSurface))),
+      Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 14), child: Text('Analytics', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
       Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Row(children: [
         _sb('Savings', '$sr%', 'Income minus expenses,\ndivided by income', accent, cs),
         const SizedBox(width: 8),
         _sb('Daily Avg', fmtAmt(da), 'Total spent this month\ndivided by days passed', const Color(0xFFF97316), cs),
         const SizedBox(width: 8),
         _sb('Avg Txn', fmtAmt(at), 'Total spent divided by\nnumber of payments', const Color(0xFF8B5CF6), cs)])),
-      Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface, border: Border.all(color: cs.outline.withOpacity(0.06))),
+      Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Projected this month', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface)),
-              Text('Your daily average × days in month', style: TextStyle(fontSize: 9, color: cs.onSurface.withOpacity(0.3)))]),
-            Text(fmtAmt(proj), style: GoogleFonts.jetBrainsMono(fontSize: 18, fontWeight: FontWeight.w800, color: monthBud > 0 && proj > monthBud ? const Color(0xFFF43F5E) : cs.onSurface))]),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Projected this month', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
+              Text('Your daily average × days in month', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.3)))]),
+            Text(fmtAmt(proj), style: GoogleFonts.jetBrainsMono(fontSize: 22, fontWeight: FontWeight.w800, color: monthBud > 0 && proj > monthBud ? const Color(0xFFF43F5E) : cs.onSurface))]),
           if (monthBud > 0) Padding(padding: const EdgeInsets.only(top: 6), child: Text('Budget: ${fmtInt(monthBud)}', style: TextStyle(fontSize: 11, color: accent, fontWeight: FontWeight.w600))),
           if (dl > 0 && monthBud > 0 && monthBud > tExp) Padding(padding: const EdgeInsets.only(top: 4), child: Text('Daily budget left: ${fmtAmt((monthBud - tExp) / dl)}', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.5))))])),
       if (pie.isNotEmpty) ...[
@@ -472,15 +473,15 @@ class _StatsTab extends StatelessWidget {
             cb > 0 ? Text('${fmtAmt(e.value)}/${fmtInt(cb)}', style: GoogleFonts.jetBrainsMono(fontSize: 10, color: e.value > cb ? const Color(0xFFF43F5E) : cs.onSurface.withOpacity(0.4)))
               : Text(fmtAmt(e.value), style: GoogleFonts.jetBrainsMono(fontSize: 10, fontWeight: FontWeight.w700, color: e.key.color)),
             const SizedBox(width: 8), SizedBox(width: 32, child: Text('$p%', style: GoogleFonts.jetBrainsMono(fontSize: 10, color: cs.onSurface.withOpacity(0.35)), textAlign: TextAlign.right))])); })],
-      if (txns.isNotEmpty) Container(margin: const EdgeInsets.fromLTRB(16, 14, 16, 0), padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: accent.withOpacity(0.06), border: Border.all(color: accent.withOpacity(0.12))),
+      if (txns.isNotEmpty) Container(margin: const EdgeInsets.fromLTRB(16, 14, 16, 0), padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: accent.withOpacity(0.06)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [const Text('🧠', style: TextStyle(fontSize: 16)), const SizedBox(width: 8), Text('AI Overview', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: accent))]), const SizedBox(height: 8),
           Text(_ai(), style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.65), height: 1.5))])),
     ]));
   }
 
-  Widget _sb(String l, String v, String tip, Color c, ColorScheme cs) => Expanded(child: Tooltip(message: tip, child: Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface, border: Border.all(color: cs.outline.withOpacity(0.06))),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(l, style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.4))), const SizedBox(height: 4), Text(v, style: GoogleFonts.jetBrainsMono(fontSize: 15, fontWeight: FontWeight.w800, color: c))]))));
+  Widget _sb(String l, String v, String tip, Color c, ColorScheme cs) => Expanded(child: Tooltip(message: tip, child: Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(l, style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))), const SizedBox(height: 4), Text(v, style: GoogleFonts.jetBrainsMono(fontSize: 16, fontWeight: FontWeight.w800, color: c))]))));
 
   String _ai() {
     final dp = DateTime.now().day; final dl = DateUtils.getDaysInMonth(DateTime.now().year, DateTime.now().month) - dp;
@@ -510,8 +511,8 @@ class _SettingsState extends State<_Settings> {
   @override Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
-      Padding(padding: const EdgeInsets.fromLTRB(18, 16, 18, 14), child: Text('Settings', style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.w800, color: cs.onSurface))),
-      Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16), decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), color: cs.surface, border: Border.all(color: cs.outline.withOpacity(0.08))),
+      Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 14), child: Text('Settings', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
+      Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16), decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), color: cs.surface),
         child: Row(children: [CircleAvatar(radius: 24, backgroundColor: widget.accent.withOpacity(0.15), child: Text(_name.isNotEmpty ? _name[0].toUpperCase() : '?', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: widget.accent))),
           const SizedBox(width: 14), Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(_name, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: cs.onSurface)), Text('Local account', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4)))])])),
       _sec('SECURITY', cs),
@@ -519,25 +520,25 @@ class _SettingsState extends State<_Settings> {
       _row('Notification Access', Icons.notifications_rounded, widget.notifOk ? 'Enabled' : 'Disabled', widget.onNotif, cs, sc: widget.notifOk ? const Color(0xFF22C55E) : const Color(0xFFF43F5E)),
       _sec('APPEARANCE', cs),
       _row('Theme', widget.isDark ? Icons.dark_mode_rounded : Icons.wb_sunny_rounded, widget.isDark ? 'Dark' : 'Light', widget.tTheme, cs),
-      Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface, border: Border.all(color: cs.outline.withOpacity(0.08))),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Accent Color', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: cs.onSurface)), const SizedBox(height: 12),
+      Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Accent Color', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)), const SizedBox(height: 12),
           Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: List.generate(8, (i) { final c = accents[i]; return GestureDetector(onTap: () => widget.sAccent(i), child: Container(width: 34, height: 34, decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(10), border: Border.all(color: c.value == widget.accent.value ? cs.onSurface : Colors.transparent, width: 2.5)), child: c.value == widget.accent.value ? const Icon(Icons.check, color: Colors.white, size: 16) : null)); }))])),
-      Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface, border: Border.all(color: cs.outline.withOpacity(0.08))),
+      Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Display Size', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: cs.onSurface)),
+          Text('Display Size', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
           Text(_scaleNames[widget.scaleIdx], style: TextStyle(fontSize: 11, color: widget.accent, fontWeight: FontWeight.w600)),
           const SizedBox(height: 12),
           Row(children: [Text('Aa', style: TextStyle(fontSize: 12, color: cs.onSurface.withOpacity(0.4))),
             Expanded(child: Slider(value: widget.scaleIdx.toDouble(), min: 0, max: 4, divisions: 4, activeColor: widget.accent, onChanged: (v) => widget.sScale(v.round()))),
             Text('Aa', style: TextStyle(fontSize: 20, color: cs.onSurface.withOpacity(0.4)))])])),
       _sec('ABOUT', cs),
-      Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface, border: Border.all(color: cs.outline.withOpacity(0.08))),
+      Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
         child: Column(children: [_ir('Version', '1.0.0', cs), const SizedBox(height: 6), _ir('Built with', 'Flutter & Dart', cs)])),
     ]));
   }
-  Widget _sec(String t, ColorScheme cs) => Padding(padding: const EdgeInsets.fromLTRB(18, 16, 18, 4), child: Text(t, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.35), letterSpacing: 1)));
-  Widget _tog(String t, IconData ic, bool v, ValueChanged<bool> fn, ColorScheme cs) => Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface, border: Border.all(color: cs.outline.withOpacity(0.08))), child: Row(children: [Icon(ic, size: 20, color: cs.onSurface.withOpacity(0.5)), const SizedBox(width: 12), Expanded(child: Text(t, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: cs.onSurface))), Switch(value: v, onChanged: fn, activeColor: widget.accent)]));
-  Widget _row(String t, IconData ic, String s, VoidCallback fn, ColorScheme cs, {Color? sc}) => GestureDetector(onTap: fn, child: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface, border: Border.all(color: cs.outline.withOpacity(0.08))), child: Row(children: [Icon(ic, size: 20, color: cs.onSurface.withOpacity(0.5)), const SizedBox(width: 12), Expanded(child: Text(t, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: cs.onSurface))), Text(s, style: TextStyle(fontSize: 12, color: sc ?? cs.onSurface.withOpacity(0.4), fontWeight: FontWeight.w600)), const SizedBox(width: 6), Icon(Icons.arrow_forward_ios_rounded, size: 14, color: cs.onSurface.withOpacity(0.2))])));
+  Widget _sec(String t, ColorScheme cs) => Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 6), child: Text(t, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.35), letterSpacing: 1)));
+  Widget _tog(String t, IconData ic, bool v, ValueChanged<bool> fn, ColorScheme cs) => Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface), child: Row(children: [Icon(ic, size: 20, color: cs.onSurface.withOpacity(0.5)), const SizedBox(width: 12), Expanded(child: Text(t, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface))), Switch(value: v, onChanged: fn, activeColor: widget.accent)]));
+  Widget _row(String t, IconData ic, String s, VoidCallback fn, ColorScheme cs, {Color? sc}) => GestureDetector(onTap: fn, child: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface), child: Row(children: [Icon(ic, size: 20, color: cs.onSurface.withOpacity(0.5)), const SizedBox(width: 12), Expanded(child: Text(t, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface))), Text(s, style: TextStyle(fontSize: 13, color: sc ?? cs.onSurface.withOpacity(0.4), fontWeight: FontWeight.w600)), const SizedBox(width: 6), Icon(Icons.arrow_forward_ios_rounded, size: 14, color: cs.onSurface.withOpacity(0.2))])));
   Widget _ir(String l, String v, ColorScheme cs) => Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(l, style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.6))), Text(v, style: TextStyle(fontSize: 12, color: cs.onSurface.withOpacity(0.4)))]);
 }
 
