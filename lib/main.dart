@@ -309,14 +309,6 @@ class _Home extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final pct = monthBud > 0 ? (tExp / monthBud).clamp(0.0, 1.0) : 0.0;
     final bal = tInc - tExp;
-    final now = DateTime.now(); final dim = DateUtils.getDaysInMonth(now.year, now.month);
-    final dayAmt = <int, double>{};
-    for (var t in txns.where((t) => t.type == 'expense' && t.date.month == now.month && t.date.year == now.year)) dayAmt[t.date.day] = (dayAmt[t.date.day] ?? 0) + t.amount;
-    final maxDay = dayAmt.values.isEmpty ? 1.0 : dayAmt.values.reduce(math.max);
-    final daily = List<double>.filled(now.day, 0);
-    for (var t in txns.where((t) => t.type == 'expense' && t.date.month == now.month && t.date.year == now.year)) if (t.date.day <= now.day) daily[t.date.day - 1] += t.amount;
-    final cum = <double>[]; double r = 0; for (var d in daily) { r += d; cum.add(r); }
-    final pie = cats.map((c) => MapEntry(c, txns.where((t) => t.type == 'expense' && t.category == c.id).fold(0.0, (s, t) => s + t.amount))).where((e) => e.value > 0).toList()..sort((a, b) => b.value.compareTo(a.value));
 
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
       Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 0), child: Text('Hi, $name 👋', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
@@ -341,34 +333,6 @@ class _Home extends StatelessWidget {
         child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Balance', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))), Text(fmtAmt(bal), style: GoogleFonts.jetBrainsMono(fontSize: 22, fontWeight: FontWeight.w800, color: bal >= 0 ? cs.onSurface : const Color(0xFFF43F5E)))]),
           Row(children: [_ms('In', '+${fmtAmt(tInc)}', const Color(0xFF22C55E), cs), const SizedBox(width: 14), _ms('Out', '-${fmtAmt(tExp)}', const Color(0xFFF43F5E), cs)])])),
-      Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('${DateFormat('MMMM').format(now)} spending', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
-          const SizedBox(height: 8),
-          Wrap(spacing: 4, runSpacing: 4, children: List.generate(dim, (i) {
-            final day = i + 1; final amt = dayAmt[day] ?? 0; final isToday = day == now.day; final isFuture = day > now.day;
-            final intensity = amt > 0 ? 0.15 + (amt / maxDay) * 0.85 : 0.0;
-            return Container(width: 22, height: 22, decoration: BoxDecoration(borderRadius: BorderRadius.circular(4),
-              color: isFuture ? cs.outline.withOpacity(0.03) : amt > 0 ? accent.withOpacity(intensity) : cs.outline.withOpacity(0.06),
-              border: isToday ? Border.all(color: accent, width: 1.5) : null),
-              child: Center(child: Text('$day', style: TextStyle(fontSize: 8, fontWeight: FontWeight.w600, color: amt > 0 && !isFuture ? (intensity > 0.5 ? Colors.white : cs.onSurface) : cs.onSurface.withOpacity(isFuture ? 0.15 : 0.3)))));
-          }))])),
-      if (cum.length > 1) Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.fromLTRB(14, 14, 14, 20), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('Spending trend', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
-            Text(fmtAmt(r), style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: const Color(0xFFF43F5E)))]),
-          Text('Day 1 → Day ${now.day}', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.3))),
-          const SizedBox(height: 10),
-          SizedBox(height: 90, child: CustomPaint(size: const Size(double.infinity, 90), painter: _TrendPainter(cum, accent)))])),
-      if (pie.isNotEmpty) Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Where your money goes', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)), const SizedBox(height: 10),
-          Row(children: [SizedBox(width: 100, height: 100, child: CustomPaint(painter: _PiePainter(pie, tExp, Theme.of(context).scaffoldBackgroundColor))),
-            const SizedBox(width: 14),
-            Expanded(child: Column(children: pie.take(5).map((e) { final p = tExp > 0 ? (e.value / tExp * 100).round() : 0;
-              return Padding(padding: const EdgeInsets.only(bottom: 4), child: Row(children: [Container(width: 8, height: 8, decoration: BoxDecoration(borderRadius: BorderRadius.circular(2), color: e.key.color)), const SizedBox(width: 6),
-                Expanded(child: Text('${e.key.icon} ${e.key.name}', style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.6)))),
-                Text('$p%', style: GoogleFonts.jetBrainsMono(fontSize: 10, fontWeight: FontWeight.w700, color: e.key.color))])); }).toList()))])])),
       if (txns.isNotEmpty) Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(12), decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: accent.withOpacity(0.06)),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('💡', style: TextStyle(fontSize: 14)), const SizedBox(width: 8), Expanded(child: Text(_ins(), style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.65), height: 1.4)))])),
       ..._grouped(txns, cs, onTap, limit: 20),
@@ -438,12 +402,19 @@ class _StatsTab extends StatelessWidget {
   const _StatsTab({required this.txns, required this.accent, required this.tExp, required this.tInc, required this.catB, required this.monthBud});
   @override Widget build(BuildContext context) { final cs = Theme.of(context).colorScheme;
     final sr = tInc > 0 ? ((tInc - tExp) / tInc * 100).round() : 0;
-    final dp = DateTime.now().day; final dl = DateUtils.getDaysInMonth(DateTime.now().year, DateTime.now().month) - dp;
+    final now = DateTime.now(); final dim = DateUtils.getDaysInMonth(now.year, now.month);
+    final dp = now.day; final dl = dim - dp;
     final da = dp > 0 && tExp > 0 ? tExp / dp : 0.0;
-    final proj = da * DateUtils.getDaysInMonth(DateTime.now().year, DateTime.now().month);
+    final proj = da * dim;
     final ec = txns.where((t) => t.type == 'expense').length;
     final at = ec > 0 ? tExp / ec : 0.0;
     final pie = cats.map((c) => MapEntry(c, txns.where((t) => t.type == 'expense' && t.category == c.id).fold(0.0, (s, t) => s + t.amount))).where((e) => e.value > 0).toList()..sort((a, b) => b.value.compareTo(a.value));
+    final dayAmt = <int, double>{};
+    for (var t in txns.where((t) => t.type == 'expense' && t.date.month == now.month && t.date.year == now.year)) dayAmt[t.date.day] = (dayAmt[t.date.day] ?? 0) + t.amount;
+    final maxDay = dayAmt.values.isEmpty ? 1.0 : dayAmt.values.reduce(math.max);
+    final daily = List<double>.filled(dp, 0);
+    for (var t in txns.where((t) => t.type == 'expense' && t.date.month == now.month && t.date.year == now.year)) if (t.date.day <= dp) daily[t.date.day - 1] += t.amount;
+    final cum = <double>[]; double cumR = 0; for (var d in daily) { cumR += d; cum.add(cumR); }
 
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
       Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 14), child: Text('Analytics', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
@@ -461,6 +432,25 @@ class _StatsTab extends StatelessWidget {
             Text(fmtAmt(proj), style: GoogleFonts.jetBrainsMono(fontSize: 22, fontWeight: FontWeight.w800, color: monthBud > 0 && proj > monthBud ? const Color(0xFFF43F5E) : cs.onSurface))]),
           if (monthBud > 0) Padding(padding: const EdgeInsets.only(top: 6), child: Text('Budget: ${fmtInt(monthBud)}', style: TextStyle(fontSize: 11, color: accent, fontWeight: FontWeight.w600))),
           if (dl > 0 && monthBud > 0 && monthBud > tExp) Padding(padding: const EdgeInsets.only(top: 4), child: Text('Daily budget left: ${fmtAmt((monthBud - tExp) / dl)}', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.5))))])),
+      Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('${DateFormat('MMMM').format(now)} spending', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
+          const SizedBox(height: 8),
+          Wrap(spacing: 4, runSpacing: 4, children: List.generate(dim, (i) {
+            final day = i + 1; final amt = dayAmt[day] ?? 0; final isToday = day == dp; final isFuture = day > dp;
+            final intensity = amt > 0 ? 0.15 + (amt / maxDay) * 0.85 : 0.0;
+            return Container(width: 22, height: 22, decoration: BoxDecoration(borderRadius: BorderRadius.circular(4),
+              color: isFuture ? cs.outline.withOpacity(0.03) : amt > 0 ? accent.withOpacity(intensity) : cs.outline.withOpacity(0.06),
+              border: isToday ? Border.all(color: accent, width: 1.5) : null),
+              child: Center(child: Text('$day', style: TextStyle(fontSize: 8, fontWeight: FontWeight.w600, color: amt > 0 && !isFuture ? (intensity > 0.5 ? Colors.white : cs.onSurface) : cs.onSurface.withOpacity(isFuture ? 0.15 : 0.3)))));
+          }))])),
+      if (cum.length > 1) Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.fromLTRB(14, 14, 14, 20), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('Spending trend', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
+            Text(fmtAmt(cumR), style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: const Color(0xFFF43F5E)))]),
+          Text('Day 1 → Day $dp', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.3))),
+          const SizedBox(height: 10),
+          SizedBox(height: 90, child: CustomPaint(size: const Size(double.infinity, 90), painter: _TrendPainter(cum, accent)))])),
       if (pie.isNotEmpty) ...[
         Padding(padding: const EdgeInsets.fromLTRB(18, 16, 18, 8), child: Text('BREAKDOWN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.35), letterSpacing: 1))),
         Center(child: SizedBox(width: 160, height: 160, child: CustomPaint(painter: _PiePainter(pie, tExp, Theme.of(context).scaffoldBackgroundColor)))),
