@@ -275,17 +275,17 @@ class _TrendPainter extends CustomPainter {
 
 Widget _tile(Txn t, ColorScheme cs, {VoidCallback? onTap}) {
   final c = fCat(t.category); final isI = t.type == 'income';
-  return GestureDetector(onTap: onTap, child: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(14),
+  return GestureDetector(onTap: onTap, child: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16),
     decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
     child: Row(children: [
       Container(width: 44, height: 44, decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: (c?.color ?? const Color(0xFF64748B)).withOpacity(0.12)), child: Center(child: Text(c?.icon ?? '📌', style: const TextStyle(fontSize: 20)))),
       const SizedBox(width: 12),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(t.merchant, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
-        const SizedBox(height: 2),
+        const SizedBox(height: 3),
         Text('${c?.name ?? "Other"} · ${DateFormat.jm().format(t.date)}', style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.4))),
-        if (t.note.isNotEmpty) Text(t.note, style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.3), fontStyle: FontStyle.italic), maxLines: 1, overflow: TextOverflow.ellipsis)])),
-      Text(isI ? '+${fmtAmt(t.amount)}' : '-${fmtAmt(t.amount)}', style: GoogleFonts.jetBrainsMono(fontSize: 14, fontWeight: FontWeight.w700, color: isI ? const Color(0xFF22C55E) : cs.onSurface))])));
+        if (t.note.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 2), child: Text(t.note, style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.3), fontStyle: FontStyle.italic), maxLines: 1, overflow: TextOverflow.ellipsis))])),
+      Text(isI ? '+${fmtAmt(t.amount)}' : '-${fmtAmt(t.amount)}', style: GoogleFonts.jetBrainsMono(fontSize: 15, fontWeight: FontWeight.w800, color: isI ? const Color(0xFF34D399) : const Color(0xFFEF4444)))])));
 }
 
 List<Widget> _grouped(List<Txn> txns, ColorScheme cs, ValueChanged<Txn> onTap, {int limit = 20}) {
@@ -309,26 +309,38 @@ class _Home extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final pct = monthBud > 0 ? (tExp / monthBud).clamp(0.0, 1.0) : 0.0;
     final bal = tInc - tExp;
+    final daysLeft = DateUtils.getDaysInMonth(DateTime.now().year, DateTime.now().month) - DateTime.now().day;
+    final left = (monthBud - tExp).clamp(0.0, double.infinity);
+    final dailyAllow = daysLeft > 0 && monthBud > 0 ? left / daysLeft : 0.0;
 
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
       Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 0), child: Text('Hi, $name 👋', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
       if (!notifOk) GestureDetector(onTap: onNotif, child: Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(10), decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), color: const Color(0xFFF43F5E).withOpacity(0.08)),
         child: Row(children: [const Icon(Icons.notifications_active_rounded, color: Color(0xFFF43F5E), size: 18), const SizedBox(width: 8), Expanded(child: Text('Enable GPay auto-detection', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: cs.onSurface)))]))),
-      GestureDetector(onTap: onEditBud, child: Container(margin: const EdgeInsets.fromLTRB(16, 12, 16, 0), padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), gradient: LinearGradient(colors: [accent.withOpacity(0.12), Colors.purple.withOpacity(0.06)])),
+      GestureDetector(onTap: onEditBud, child: Container(margin: const EdgeInsets.fromLTRB(16, 12, 16, 0), padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), gradient: LinearGradient(colors: [accent.withOpacity(0.10), Colors.purple.withOpacity(0.04)])),
         child: monthBud > 0
-          ? Row(children: [
-              SizedBox(width: 100, height: 100, child: TweenAnimationBuilder<double>(tween: Tween(begin: 0, end: pct), duration: const Duration(milliseconds: 1200), curve: Curves.easeOutCubic,
-                builder: (_, v, __) => Stack(alignment: Alignment.center, children: [SizedBox(width: 100, height: 100, child: CircularProgressIndicator(value: v, strokeWidth: 8, strokeCap: StrokeCap.round, backgroundColor: cs.outline.withOpacity(0.08), valueColor: AlwaysStoppedAnimation(v > 0.9 ? const Color(0xFFF43F5E) : accent))),
-                  Column(mainAxisSize: MainAxisSize.min, children: [Text('${(v * 100).round()}%', style: GoogleFonts.jetBrainsMono(fontSize: 22, fontWeight: FontWeight.w800, color: cs.onSurface)), Text('used', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4)))])]))),
-              const SizedBox(width: 16),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('MONTHLY BUDGET', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4), letterSpacing: 1.5, fontWeight: FontWeight.w600)),
-                Text(fmtInt(monthBud), style: GoogleFonts.jetBrainsMono(fontSize: 22, fontWeight: FontWeight.w900, color: accent)),
-                const SizedBox(height: 6),
-                _kv('Spent', fmtAmt(tExp), const Color(0xFFF43F5E), cs),
-                _kv('Left', fmtAmt((monthBud - tExp).clamp(0, double.infinity)), const Color(0xFF22C55E), cs)]))])
-          : Center(child: Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Column(children: [Text('Set your monthly budget', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: cs.onSurface)), const SizedBox(height: 4), Text('Tap here to get started', style: TextStyle(fontSize: 12, color: accent))]))))),
+          ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('MONTHLY BUDGET', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4), letterSpacing: 1.5, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              Text(fmtAmt(left), style: GoogleFonts.jetBrainsMono(fontSize: 28, fontWeight: FontWeight.w800, color: pct > 0.9 ? const Color(0xFFF43F5E) : cs.onSurface)),
+              Text('left of ${fmtInt(monthBud)}', style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.4))),
+              const SizedBox(height: 14),
+              TweenAnimationBuilder<double>(tween: Tween(begin: 0, end: pct), duration: const Duration(milliseconds: 1200), curve: Curves.easeOutCubic,
+                builder: (_, v, __) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  ClipRRect(borderRadius: BorderRadius.circular(4), child: LinearProgressIndicator(value: v, minHeight: 8, backgroundColor: cs.outline.withOpacity(0.08), valueColor: AlwaysStoppedAnimation(v > 0.9 ? const Color(0xFFF43F5E) : accent))),
+                  const SizedBox(height: 8),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    Text('${(v * 100).round()}% used', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))),
+                    if (daysLeft > 0 && left > 0) Text('${fmtAmt(dailyAllow)}/day · $daysLeft days left', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4)))])]))])
+          : Column(children: [
+              const SizedBox(height: 8),
+              Icon(Icons.account_balance_wallet_rounded, size: 32, color: accent.withOpacity(0.5)),
+              const SizedBox(height: 10),
+              Text('Set your monthly budget', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
+              const SizedBox(height: 4),
+              Text('Tap to get started', style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.4))),
+              const SizedBox(height: 8)]))),
       Container(margin: const EdgeInsets.fromLTRB(16, 8, 16, 0), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: cs.surface),
         child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Balance', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))), Text(fmtAmt(bal), style: GoogleFonts.jetBrainsMono(fontSize: 22, fontWeight: FontWeight.w800, color: bal >= 0 ? cs.onSurface : const Color(0xFFF43F5E)))]),
