@@ -525,34 +525,55 @@ class _SettingsState extends State<_Settings> {
     final cs = Theme.of(context).colorScheme;
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
       Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 14), child: Text('Settings', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
-      Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16), decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), color: cs.surface),
-        child: Row(children: [CircleAvatar(radius: 24, backgroundColor: widget.accent.withOpacity(0.15), child: Text(_name.isNotEmpty ? _name[0].toUpperCase() : '?', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: widget.accent))),
-          const SizedBox(width: 14), Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(_name, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: cs.onSurface)), Text('Local account', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4)))])])),
-      _sec('SECURITY', cs),
+      // ── PROFILE ──
+      Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(18), decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), color: cs.surface),
+        child: Row(children: [CircleAvatar(radius: 26, backgroundColor: widget.accent.withOpacity(0.15), child: Text(_name.isNotEmpty ? _name[0].toUpperCase() : '?', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: widget.accent))),
+          const SizedBox(width: 14), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(_name, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: cs.onSurface)), Text('Local account', style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.4)))]))])),
+      // ── SECURITY ──
+      _sec('SECURITY', Icons.shield_rounded, cs),
       _tog('Fingerprint Lock', Icons.fingerprint_rounded, _bio, (v) async { final p = await SharedPreferences.getInstance(); p.setBool('biometric', v); setState(() => _bio = v); }, cs),
-      _row('Notification Access', Icons.notifications_rounded, widget.notifOk ? 'Enabled' : 'Disabled', widget.onNotif, cs, sc: widget.notifOk ? const Color(0xFF22C55E) : const Color(0xFFF43F5E)),
-      _sec('APPEARANCE', cs),
+      _row('Notification Access', Icons.notifications_rounded, widget.notifOk ? 'Enabled' : 'Disabled', widget.onNotif, cs, sc: widget.notifOk ? const Color(0xFF34D399) : const Color(0xFFEF4444)),
+      // ── APPEARANCE ──
+      _sec('APPEARANCE', Icons.palette_rounded, cs),
       _row('Theme', widget.isDark ? Icons.dark_mode_rounded : Icons.wb_sunny_rounded, widget.isDark ? 'Dark' : 'Light', widget.tTheme, cs),
       Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Accent Color', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)), const SizedBox(height: 12),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: List.generate(8, (i) { final c = accents[i]; return GestureDetector(onTap: () => widget.sAccent(i), child: Container(width: 34, height: 34, decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(10), border: Border.all(color: c.value == widget.accent.value ? cs.onSurface : Colors.transparent, width: 2.5)), child: c.value == widget.accent.value ? const Icon(Icons.check, color: Colors.white, size: 16) : null)); }))])),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Accent Color', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)), const SizedBox(height: 14),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: List.generate(8, (i) { final c = accents[i]; return GestureDetector(onTap: () => widget.sAccent(i), child: Container(width: 36, height: 36, decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(12), border: Border.all(color: c.value == widget.accent.value ? cs.onSurface : Colors.transparent, width: 2.5)), child: c.value == widget.accent.value ? const Icon(Icons.check, color: Colors.white, size: 16) : null)); }))])),
       Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Display Size', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
-          Text(_scaleNames[widget.scaleIdx], style: TextStyle(fontSize: 11, color: widget.accent, fontWeight: FontWeight.w600)),
+          Text(_scaleNames[widget.scaleIdx], style: TextStyle(fontSize: 13, color: widget.accent, fontWeight: FontWeight.w600)),
           const SizedBox(height: 12),
           Row(children: [Text('Aa', style: TextStyle(fontSize: 12, color: cs.onSurface.withOpacity(0.4))),
             Expanded(child: Slider(value: widget.scaleIdx.toDouble(), min: 0, max: 4, divisions: 4, activeColor: widget.accent, onChanged: (v) => widget.sScale(v.round()))),
             Text('Aa', style: TextStyle(fontSize: 20, color: cs.onSurface.withOpacity(0.4)))])])),
-      _sec('ABOUT', cs),
-      Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
-        child: Column(children: [_ir('Version', '1.0.0', cs), const SizedBox(height: 6), _ir('Built with', 'Flutter & Dart', cs)])),
+      // ── DATA ──
+      _sec('DATA', Icons.storage_rounded, cs),
+      _row('Export CSV', Icons.download_rounded, 'Coming soon', () {}, cs, sc: cs.onSurface.withOpacity(0.25)),
+      _row('Backup & Restore', Icons.cloud_upload_rounded, 'Coming soon', () {}, cs, sc: cs.onSurface.withOpacity(0.25)),
+      // ── ABOUT ──
+      _sec('ABOUT', Icons.info_outline_rounded, cs),
+      Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.fromLTRB(20, 24, 20, 24), decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), color: cs.surface),
+        child: Column(children: [
+          Text('ZENITH', style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.w800, color: widget.accent, letterSpacing: 2)),
+          const SizedBox(height: 4),
+          Text('Track Less. Know More.', style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.4))),
+          const SizedBox(height: 20),
+          _ir('Version', '1.0.0', cs),
+          const SizedBox(height: 8),
+          _ir('Built with', 'Flutter & Dart', cs),
+          const SizedBox(height: 8),
+          _ir('Database', 'zenith_v7', cs),
+          const SizedBox(height: 16),
+          Text('Created by Siddharth Ganesh', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.3))),
+        ])),
+      const SizedBox(height: 16),
     ]));
   }
-  Widget _sec(String t, ColorScheme cs) => Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 6), child: Text(t, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.35), letterSpacing: 1)));
+  Widget _sec(String t, IconData ic, ColorScheme cs) => Padding(padding: const EdgeInsets.fromLTRB(20, 20, 20, 6), child: Row(children: [Icon(ic, size: 14, color: cs.onSurface.withOpacity(0.3)), const SizedBox(width: 6), Text(t, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.35), letterSpacing: 1))]));
   Widget _tog(String t, IconData ic, bool v, ValueChanged<bool> fn, ColorScheme cs) => Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface), child: Row(children: [Icon(ic, size: 20, color: cs.onSurface.withOpacity(0.5)), const SizedBox(width: 12), Expanded(child: Text(t, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface))), Switch(value: v, onChanged: fn, activeColor: widget.accent)]));
   Widget _row(String t, IconData ic, String s, VoidCallback fn, ColorScheme cs, {Color? sc}) => GestureDetector(onTap: fn, child: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface), child: Row(children: [Icon(ic, size: 20, color: cs.onSurface.withOpacity(0.5)), const SizedBox(width: 12), Expanded(child: Text(t, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface))), Text(s, style: TextStyle(fontSize: 13, color: sc ?? cs.onSurface.withOpacity(0.4), fontWeight: FontWeight.w600)), const SizedBox(width: 6), Icon(Icons.arrow_forward_ios_rounded, size: 14, color: cs.onSurface.withOpacity(0.2))])));
-  Widget _ir(String l, String v, ColorScheme cs) => Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(l, style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.6))), Text(v, style: TextStyle(fontSize: 12, color: cs.onSurface.withOpacity(0.4)))]);
+  Widget _ir(String l, String v, ColorScheme cs) => Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(l, style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.5))), Text(v, style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.35)))]);
 }
 
 // ═══ SHEETS ═══
