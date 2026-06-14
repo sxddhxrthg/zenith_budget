@@ -348,7 +348,12 @@ class _Home extends StatelessWidget {
       if (txns.isNotEmpty) Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(12), decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: accent.withOpacity(0.06)),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('💡', style: TextStyle(fontSize: 14)), const SizedBox(width: 8), Expanded(child: Text(_ins(), style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.65), height: 1.4)))])),
       ..._grouped(txns, cs, onTap, limit: 20),
-      if (txns.isEmpty) Padding(padding: const EdgeInsets.all(32), child: Center(child: Text('No transactions yet.\nMake a payment to get started!', textAlign: TextAlign.center, style: TextStyle(color: cs.onSurface.withOpacity(0.35))))),
+      if (txns.isEmpty) Padding(padding: const EdgeInsets.fromLTRB(32, 48, 32, 32), child: Column(children: [
+        Icon(Icons.receipt_long_rounded, size: 48, color: cs.onSurface.withOpacity(0.12)),
+        const SizedBox(height: 16),
+        Text('No transactions yet', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.4))),
+        const SizedBox(height: 6),
+        Text('Your spending will appear here\nautomatically from GPay', textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.25)))])),
     ]));
   }
 
@@ -358,7 +363,7 @@ class _Home extends StatelessWidget {
     final now = DateTime.now(); final dp = now.day; final dl = DateUtils.getDaysInMonth(now.year, now.month) - dp;
     final da = dp > 0 && tExp > 0 ? tExp / dp : 0.0;
     final top = cats.map((c) => MapEntry(c, txns.where((t) => t.type == 'expense' && t.date.month == now.month && t.category == c.id).fold(0.0, (s, t) => s + t.amount))).where((e) => e.value > 0).toList()..sort((a, b) => b.value.compareTo(a.value));
-    if (top.isEmpty) return 'No spending yet this month!';
+    if (top.isEmpty) return 'No spending this month yet. Your insights will appear as you spend.';
     final p = <String>[];
     if (monthBud > 0) { final proj = da * DateUtils.getDaysInMonth(now.year, now.month); p.add(proj > monthBud * 1.1 ? 'At this pace: ${fmtAmt(proj)} — ${((proj / monthBud - 1) * 100).round()}% over budget.' : 'On track — ${fmtAmt(monthBud - tExp)} left, $dl days.'); }
     p.add('Top: ${top.first.key.icon} ${top.first.key.name} ${fmtAmt(top.first.value)}.');
@@ -376,6 +381,12 @@ class _Activity extends StatelessWidget {
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
       Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 4), child: Text('Activity', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
       Padding(padding: const EdgeInsets.fromLTRB(20, 0, 20, 8), child: Text('${txns.length} transaction${txns.length == 1 ? '' : 's'}', style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.4)))),
+      if (txns.isEmpty) Padding(padding: const EdgeInsets.fromLTRB(32, 48, 32, 32), child: Column(children: [
+        Icon(Icons.swap_vert_rounded, size: 48, color: cs.onSurface.withOpacity(0.12)),
+        const SizedBox(height: 16),
+        Text('No activity yet', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.4))),
+        const SizedBox(height: 6),
+        Text('Transactions will show up here\nas you spend', textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.25)))])),
       ..._grouped(txns, cs, onTap, limit: 200)]));
   }
 }
@@ -488,7 +499,7 @@ class _StatsTab extends StatelessWidget {
   String _ai() {
     final dp = DateTime.now().day; final dl = DateUtils.getDaysInMonth(DateTime.now().year, DateTime.now().month) - dp;
     final da = dp > 0 && tExp > 0 ? tExp / dp : 0.0; final proj = da * DateUtils.getDaysInMonth(DateTime.now().year, DateTime.now().month);
-    if (tExp == 0) return 'No expenses yet.';
+    if (tExp == 0) return 'No expenses recorded yet. Add transactions to see spending insights.';
     final ec = txns.where((t) => t.type == 'expense').length;
     final p = <String>[];
     p.add('$ec expenses, avg ${fmtAmt(tExp / ec)} each.');
