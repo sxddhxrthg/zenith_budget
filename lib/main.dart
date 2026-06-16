@@ -137,7 +137,7 @@ class _ShellState extends State<Shell> {
       else {
         final auto = await Db.getAutoCat(merch);
         if (auto != null) { await Db.insTxn(Txn(id: _uid(), amount: amt, merchant: merch, category: auto, account: acc, type: 'expense', date: DateTime.now()).toMap()); await _load();
-          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Auto: ${fmtAmt(amt)} → ${fCat(auto)?.name}'), duration: const Duration(seconds: 3)));
+          if (mounted) _snack('Auto: ${fmtAmt(amt)} → ${fCat(auto)?.name}', bg: const Color(0xFF34D399).withOpacity(0.85));
         } else if (mounted) { _showExpCat(amt, merch, acc); }
       }
     });
@@ -172,12 +172,27 @@ class _ShellState extends State<Shell> {
 
   void _showEdit(Txn t) => showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
     builder: (ctx) => _EditSheet(txn: t, accent: widget.accent,
-      onSave: (u) async { await Db.updTxn(u.toMap()); await _load(); if (ctx.mounted) Navigator.pop(ctx); },
-      onDelete: () async { await Db.delTxn(t.id); await _load(); if (ctx.mounted) Navigator.pop(ctx); },
+      onSave: (u) async { await Db.updTxn(u.toMap()); await _load(); if (ctx.mounted) Navigator.pop(ctx); _snack('Changes saved', bg: const Color(0xFF34D399).withOpacity(0.85)); },
+      onDelete: () async { final saved = t.toMap(); await Db.delTxn(t.id); await _load(); if (ctx.mounted) Navigator.pop(ctx);
+        _snack('Transaction deleted', bg: const Color(0xFFEF4444).withOpacity(0.85), action: SnackBarAction(label: 'UNDO', textColor: Colors.white, onPressed: () async { HapticFeedback.lightImpact(); await Db.insTxn(saved); await _load(); }), seconds: 4); },
       onStopAuto: () async { await Db.stopAuto(t.merchant); await _load(); if (ctx.mounted) Navigator.pop(ctx);
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Auto stopped for ${t.merchant}'))); }));
+        _snack('Auto stopped for ${t.merchant}'); }));
 
-  void _delTxn(Txn t) async { HapticFeedback.mediumImpact(); await Db.delTxn(t.id); await _load(); }
+  void _delTxn(Txn t) async {
+    HapticFeedback.mediumImpact(); final saved = t.toMap();
+    await Db.delTxn(t.id); await _load();
+    if (!mounted) return;
+    _snack('Transaction deleted', bg: const Color(0xFFEF4444).withOpacity(0.85), action: SnackBarAction(label: 'UNDO', textColor: Colors.white, onPressed: () async { HapticFeedback.lightImpact(); await Db.insTxn(saved); await _load(); }), seconds: 4);
+  }
+
+  void _snack(String msg, {Color? bg, SnackBarAction? action, int seconds = 3}) {
+    if (!mounted) return; ScaffoldMessenger.of(context).clearSnackBars();
+    final cs = Theme.of(context).colorScheme;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+      backgroundColor: bg ?? cs.surface, behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 88), duration: Duration(seconds: seconds), action: action));
+  }
 
   void _editMonthBud() { final c = TextEditingController(text: _monthBud > 0 ? '$_monthBud' : '');
     showDialog(context: context, builder: (ctx) { final cs = Theme.of(ctx).colorScheme; return AlertDialog(
