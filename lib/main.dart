@@ -185,9 +185,9 @@ class _ShellState extends State<Shell> {
           decoration: InputDecoration(prefixText: '₹ ', hintText: '10000', filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
         const SizedBox(height: 8),
         Text('Enter exact amount. No rounding.', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4)))]),
-      actions: [if (_monthBud > 0) TextButton(onPressed: () async { await setMonthlyBudget(0); await _load(); if (ctx.mounted) Navigator.pop(ctx); }, child: const Text('Remove', style: TextStyle(color: Color(0xFFF43F5E)))),
+      actions: [if (_monthBud > 0) TextButton(onPressed: () async { HapticFeedback.mediumImpact(); await setMonthlyBudget(0); await _load(); if (ctx.mounted) Navigator.pop(ctx); }, child: const Text('Remove', style: TextStyle(color: Color(0xFFEF4444)))),
         TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-        ElevatedButton(onPressed: () async { final v = int.tryParse(c.text.replaceAll(',','').replaceAll(' ','')) ?? 0; await setMonthlyBudget(v); await _load(); if (ctx.mounted) Navigator.pop(ctx); },
+        ElevatedButton(onPressed: () async { HapticFeedback.lightImpact(); final v = int.tryParse(c.text.replaceAll(',','').replaceAll(' ','')) ?? 0; await setMonthlyBudget(v); await _load(); if (ctx.mounted) Navigator.pop(ctx); },
           style: ElevatedButton.styleFrom(backgroundColor: widget.accent, foregroundColor: Colors.white), child: const Text('Save'))]); }); }
 
   void _editCatBud(String catId) { final cur = _catB[catId] ?? 0;
@@ -196,9 +196,9 @@ class _ShellState extends State<Shell> {
       title: Text('${fCat(catId)?.icon} ${fCat(catId)?.name ?? catId}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
       content: TextField(controller: c, keyboardType: TextInputType.number, autofocus: true, style: GoogleFonts.jetBrainsMono(fontSize: 24, fontWeight: FontWeight.w700),
         decoration: InputDecoration(prefixText: '₹ ', hintText: '0', filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
-      actions: [if (cur > 0) TextButton(onPressed: () async { await Db.delCatBudget(catId); await _load(); if (ctx.mounted) Navigator.pop(ctx); }, child: const Text('Remove', style: TextStyle(color: Color(0xFFF43F5E)))),
+      actions: [if (cur > 0) TextButton(onPressed: () async { HapticFeedback.mediumImpact(); await Db.delCatBudget(catId); await _load(); if (ctx.mounted) Navigator.pop(ctx); }, child: const Text('Remove', style: TextStyle(color: Color(0xFFEF4444)))),
         TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-        ElevatedButton(onPressed: () async { final v = int.tryParse(c.text.replaceAll(',','').replaceAll(' ','')) ?? 0; if (v > 0) await Db.setCatBudget(catId, v); else await Db.delCatBudget(catId); await _load(); if (ctx.mounted) Navigator.pop(ctx); },
+        ElevatedButton(onPressed: () async { HapticFeedback.lightImpact(); final v = int.tryParse(c.text.replaceAll(',','').replaceAll(' ','')) ?? 0; if (v > 0) await Db.setCatBudget(catId, v); else await Db.delCatBudget(catId); await _load(); if (ctx.mounted) Navigator.pop(ctx); },
           style: ElevatedButton.styleFrom(backgroundColor: widget.accent, foregroundColor: Colors.white), child: const Text('Save'))]); }); }
 
   double get tExp => _txns.where((t) => t.type == 'expense').fold(0.0, (s, t) => s + t.amount);
@@ -218,13 +218,13 @@ class _ShellState extends State<Shell> {
     ];
     return Scaffold(body: Stack(children: [
       tabs[_tab],
-      Positioned(right: 20, bottom: bottomPad + 76, child: GestureDetector(onTap: _showAdd,
+      Positioned(right: 20, bottom: bottomPad + 76, child: GestureDetector(onTap: () { HapticFeedback.lightImpact(); _showAdd(); },
         child: Container(width: 52, height: 52, decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), color: widget.accent, boxShadow: [BoxShadow(color: widget.accent.withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 4))]),
           child: const Icon(Icons.add_rounded, color: Colors.white, size: 24)))),
       Positioned(left: 20, right: 20, bottom: bottomPad + 12, child: Container(decoration: BoxDecoration(color: cs.surface, borderRadius: BorderRadius.circular(28), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 24, offset: const Offset(0, 4))]),
         child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10), child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: List.generate(5, (i) { final icons = [Icons.home_rounded, Icons.swap_vert_rounded, Icons.pie_chart_rounded, Icons.analytics_rounded, Icons.settings_rounded]; final sel = _tab == i;
-            return GestureDetector(onTap: () => setState(() => _tab = i), behavior: HitTestBehavior.opaque,
+            return GestureDetector(onTap: () { HapticFeedback.lightImpact(); setState(() => _tab = i); }, behavior: HitTestBehavior.opaque,
               child: AnimatedContainer(duration: const Duration(milliseconds: 200), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), color: sel ? widget.accent.withOpacity(0.12) : Colors.transparent),
                 child: Icon(icons[i], size: 24, color: sel ? widget.accent : cs.onSurface.withOpacity(0.35)))); })))))]));
@@ -531,14 +531,14 @@ class _SettingsState extends State<_Settings> {
           const SizedBox(width: 14), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(_name, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: cs.onSurface)), Text('Local account', style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.4)))]))])),
       // ── SECURITY ──
       _sec('SECURITY', Icons.shield_rounded, cs),
-      _tog('Fingerprint Lock', Icons.fingerprint_rounded, _bio, (v) async { final p = await SharedPreferences.getInstance(); p.setBool('biometric', v); setState(() => _bio = v); }, cs),
+      _tog('Fingerprint Lock', Icons.fingerprint_rounded, _bio, (v) async { HapticFeedback.lightImpact(); final p = await SharedPreferences.getInstance(); p.setBool('biometric', v); setState(() => _bio = v); }, cs),
       _row('Notification Access', Icons.notifications_rounded, widget.notifOk ? 'Enabled' : 'Disabled', widget.onNotif, cs, sc: widget.notifOk ? const Color(0xFF34D399) : const Color(0xFFEF4444)),
       // ── APPEARANCE ──
       _sec('APPEARANCE', Icons.palette_rounded, cs),
       _row('Theme', widget.isDark ? Icons.dark_mode_rounded : Icons.wb_sunny_rounded, widget.isDark ? 'Dark' : 'Light', widget.tTheme, cs),
       Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Accent Color', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)), const SizedBox(height: 14),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: List.generate(8, (i) { final c = accents[i]; return GestureDetector(onTap: () => widget.sAccent(i), child: Container(width: 36, height: 36, decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(12), border: Border.all(color: c.value == widget.accent.value ? cs.onSurface : Colors.transparent, width: 2.5)), child: c.value == widget.accent.value ? const Icon(Icons.check, color: Colors.white, size: 16) : null)); }))])),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: List.generate(8, (i) { final c = accents[i]; return GestureDetector(onTap: () { HapticFeedback.lightImpact(); widget.sAccent(i); }, child: Container(width: 36, height: 36, decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(12), border: Border.all(color: c.value == widget.accent.value ? cs.onSurface : Colors.transparent, width: 2.5)), child: c.value == widget.accent.value ? const Icon(Icons.check, color: Colors.white, size: 16) : null)); }))])),
       Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Display Size', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
@@ -680,8 +680,8 @@ class _EditSheetState extends State<_EditSheet> {
       child: ListView(padding: const EdgeInsets.fromLTRB(18, 12, 18, 34), children: [
         Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: cs.outline.withOpacity(0.3), borderRadius: BorderRadius.circular(2)))), const SizedBox(height: 16),
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('Edit', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: cs.onSurface)),
-          Row(children: [TextButton(onPressed: widget.onStopAuto, child: Text('Stop Auto', style: TextStyle(color: cs.onSurface.withOpacity(0.4), fontSize: 12))),
-            TextButton(onPressed: widget.onDelete, child: const Text('Delete', style: TextStyle(color: Color(0xFFF43F5E), fontWeight: FontWeight.w700, fontSize: 12)))])]),
+          Row(children: [TextButton(onPressed: () { HapticFeedback.lightImpact(); widget.onStopAuto(); }, child: Text('Stop Auto', style: TextStyle(color: cs.onSurface.withOpacity(0.4), fontSize: 12))),
+            TextButton(onPressed: () { HapticFeedback.mediumImpact(); widget.onDelete(); }, child: const Text('Delete', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.w700, fontSize: 12)))])]),
         const SizedBox(height: 8),
         Text(isI ? '+${fmtAmt(widget.txn.amount)}' : '-${fmtAmt(widget.txn.amount)}', style: GoogleFonts.jetBrainsMono(fontSize: 26, fontWeight: FontWeight.w800, color: isI ? const Color(0xFF22C55E) : cs.onSurface)),
         Text('${widget.txn.merchant} · ${DateFormat('MMM d, h:mm a').format(widget.txn.date)}', style: TextStyle(fontSize: 12, color: cs.onSurface.withOpacity(0.5))),
