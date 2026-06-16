@@ -177,6 +177,8 @@ class _ShellState extends State<Shell> {
       onStopAuto: () async { await Db.stopAuto(t.merchant); await _load(); if (ctx.mounted) Navigator.pop(ctx);
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Auto stopped for ${t.merchant}'))); }));
 
+  void _delTxn(Txn t) async { HapticFeedback.mediumImpact(); await Db.delTxn(t.id); await _load(); }
+
   void _editMonthBud() { final c = TextEditingController(text: _monthBud > 0 ? '$_monthBud' : '');
     showDialog(context: context, builder: (ctx) { final cs = Theme.of(ctx).colorScheme; return AlertDialog(
       title: const Text('Monthly Budget', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
@@ -210,8 +212,8 @@ class _ShellState extends State<Shell> {
     final cs = Theme.of(context).colorScheme;
     final bottomPad = MediaQuery.of(context).padding.bottom;
     final tabs = [
-      _Home(txns: _txns, catB: _catB, monthBud: _monthBud, accent: widget.accent, name: widget.name, tExp: tExp, tInc: tInc, notifOk: _notifOk, onNotif: () { NB.openNotif(); Future.delayed(const Duration(seconds: 3), _checkNotif); }, onAdd: _showAdd, onTap: _showEdit, onEditBud: _editMonthBud),
-      _Activity(txns: _txns, onTap: _showEdit),
+      _Home(txns: _txns, catB: _catB, monthBud: _monthBud, accent: widget.accent, name: widget.name, tExp: tExp, tInc: tInc, notifOk: _notifOk, onNotif: () { NB.openNotif(); Future.delayed(const Duration(seconds: 3), _checkNotif); }, onAdd: _showAdd, onTap: _showEdit, onEditBud: _editMonthBud, onDelete: _delTxn),
+      _Activity(txns: _txns, onTap: _showEdit, onDelete: _delTxn),
       _BudgetsTab(txns: _txns, catB: _catB, monthBud: _monthBud, accent: widget.accent, onEditTotal: _editMonthBud, onEditCat: _editCatBud),
       _StatsTab(txns: _txns, accent: widget.accent, tExp: tExp, tInc: tInc, catB: _catB, monthBud: _monthBud),
       _Settings(accent: widget.accent, isDark: widget.isDark, notifOk: _notifOk, scaleIdx: widget.scaleIdx, tTheme: widget.tTheme, sAccent: widget.sAccent, sScale: widget.sScale, onNotif: () { NB.openNotif(); Future.delayed(const Duration(seconds: 3), _checkNotif); }),
@@ -288,13 +290,20 @@ Widget _tile(Txn t, ColorScheme cs, {VoidCallback? onTap}) {
       Text(isI ? '+${fmtAmt(t.amount)}' : '-${fmtAmt(t.amount)}', style: GoogleFonts.jetBrainsMono(fontSize: 15, fontWeight: FontWeight.w800, color: isI ? const Color(0xFF34D399) : const Color(0xFFEF4444)))])));
 }
 
-List<Widget> _grouped(List<Txn> txns, ColorScheme cs, ValueChanged<Txn> onTap, {int limit = 20}) {
+List<Widget> _grouped(List<Txn> txns, ColorScheme cs, ValueChanged<Txn> onTap, {int limit = 20, ValueChanged<Txn>? onDelete}) {
   final w = <Widget>[]; String? last;
   for (final t in txns.take(limit)) {
     final d = DateFormat('EEEE, d MMM').format(t.date);
     if (d != last) { last = d; final l = DateUtils.isSameDay(t.date, DateTime.now()) ? 'Today' : DateUtils.isSameDay(t.date, DateTime.now().subtract(const Duration(days: 1))) ? 'Yesterday' : d;
       w.add(Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 6), child: Text(l, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.45))))); }
-    w.add(_tile(t, cs, onTap: () => onTap(t))); }
+    w.add(Dismissible(key: Key(t.id),
+      background: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: const Color(0xFF3B82F6).withOpacity(0.15)),
+        alignment: Alignment.centerLeft, padding: const EdgeInsets.only(left: 24), child: const Icon(Icons.edit_rounded, color: Color(0xFF3B82F6), size: 22)),
+      secondaryBackground: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: const Color(0xFFEF4444).withOpacity(0.15)),
+        alignment: Alignment.centerRight, padding: const EdgeInsets.only(right: 24), child: const Icon(Icons.delete_rounded, color: Color(0xFFEF4444), size: 22)),
+      confirmDismiss: (dir) async { if (dir == DismissDirection.startToEnd) { HapticFeedback.lightImpact(); onTap(t); return false; } return true; },
+      onDismissed: (_) => onDelete?.call(t),
+      child: _tile(t, cs, onTap: () => onTap(t)))); }
   return w;
 }
 
@@ -302,8 +311,8 @@ List<Widget> _grouped(List<Txn> txns, ColorScheme cs, ValueChanged<Txn> onTap, {
 
 class _Home extends StatelessWidget {
   final List<Txn> txns; final Map<String, int> catB; final int monthBud; final Color accent; final String name; final bool notifOk;
-  final double tExp, tInc; final VoidCallback onNotif, onAdd, onEditBud; final ValueChanged<Txn> onTap;
-  const _Home({required this.txns, required this.catB, required this.monthBud, required this.accent, required this.name, required this.notifOk, required this.tExp, required this.tInc, required this.onNotif, required this.onAdd, required this.onTap, required this.onEditBud});
+  final double tExp, tInc; final VoidCallback onNotif, onAdd, onEditBud; final ValueChanged<Txn> onTap, onDelete;
+  const _Home({required this.txns, required this.catB, required this.monthBud, required this.accent, required this.name, required this.notifOk, required this.tExp, required this.tInc, required this.onNotif, required this.onAdd, required this.onTap, required this.onEditBud, required this.onDelete});
 
   @override Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -347,7 +356,7 @@ class _Home extends StatelessWidget {
           Row(children: [_ms('In', '+${fmtAmt(tInc)}', const Color(0xFF22C55E), cs), const SizedBox(width: 14), _ms('Out', '-${fmtAmt(tExp)}', const Color(0xFFF43F5E), cs)])])),
       if (txns.isNotEmpty) Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(12), decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: accent.withOpacity(0.06)),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('💡', style: TextStyle(fontSize: 14)), const SizedBox(width: 8), Expanded(child: Text(_ins(), style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.65), height: 1.4)))])),
-      ..._grouped(txns, cs, onTap, limit: 20),
+      ..._grouped(txns, cs, onTap, limit: 20, onDelete: onDelete),
       if (txns.isEmpty) Padding(padding: const EdgeInsets.fromLTRB(32, 48, 32, 32), child: Column(children: [
         Icon(Icons.receipt_long_rounded, size: 48, color: cs.onSurface.withOpacity(0.12)),
         const SizedBox(height: 16),
@@ -375,8 +384,8 @@ class _Home extends StatelessWidget {
 // ═══ ACTIVITY ═══
 
 class _Activity extends StatelessWidget {
-  final List<Txn> txns; final ValueChanged<Txn> onTap;
-  const _Activity({required this.txns, required this.onTap});
+  final List<Txn> txns; final ValueChanged<Txn> onTap, onDelete;
+  const _Activity({required this.txns, required this.onTap, required this.onDelete});
   @override Widget build(BuildContext context) { final cs = Theme.of(context).colorScheme;
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
       Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 4), child: Text('Activity', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
@@ -387,7 +396,7 @@ class _Activity extends StatelessWidget {
         Text('No activity yet', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.4))),
         const SizedBox(height: 6),
         Text('Transactions will show up here\nas you spend', textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.25)))])),
-      ..._grouped(txns, cs, onTap, limit: 200)]));
+      ..._grouped(txns, cs, onTap, limit: 200, onDelete: onDelete)]));
   }
 }
 
