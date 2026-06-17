@@ -9,6 +9,12 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import 'package:firebase_core/firebase_core.dart';
 import 'auth_bypass.dart';
+import 'models/transaction.dart';
+import 'models/category.dart';
+import 'utils/formatters.dart';
+import 'theme/app_constants.dart';
+import 'widgets/painters.dart';
+import 'widgets/transaction_tile.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -60,23 +66,7 @@ class NB {
 
 // ═══ MODELS ═══
 
-class Txn {
-  String id; double amount; String merchant, category, account, type, note; DateTime date;
-  Txn({required this.id, required this.amount, required this.merchant, required this.category, required this.account, required this.type, required this.date, this.note = ''});
-  Map<String, dynamic> toMap() => {'id': id, 'amount': amount, 'merchant': merchant, 'category': category, 'account': account, 'type': type, 'date': date.toIso8601String(), 'note': note};
-  factory Txn.fromMap(Map<String, dynamic> m) => Txn(id: m['id'], amount: (m['amount'] as num).toDouble(), merchant: m['merchant'] ?? '', category: m['category'] ?? 'other', account: m['account'] ?? 'gpay', type: m['type'] ?? 'expense', date: DateTime.tryParse(m['date'] ?? '') ?? DateTime.now(), note: m['note'] ?? '');
-}
 
-class Cat { final String id, name, icon; final Color color; Cat(this.id, this.name, this.icon, this.color); }
-final cats = <Cat>[Cat("food","Food & Dining","🍕",const Color(0xFFFF6B35)),Cat("transport","Transport","🚗",const Color(0xFF00D4FF)),Cat("shopping","Shopping","🛍️",const Color(0xFFA855F7)),Cat("entertainment","Entertainment","🎬",const Color(0xFFF43F5E)),Cat("groceries","Groceries","🥦",const Color(0xFF22C55E)),Cat("bills","Bills & Utilities","💡",const Color(0xFFEAB308)),Cat("health","Health","💊",const Color(0xFF06B6D4)),Cat("education","Education","📚",const Color(0xFF8B5CF6)),Cat("subscriptions","Subscriptions","📱",const Color(0xFFEC4899)),Cat("travel","Travel","✈️",const Color(0xFFF97316)),Cat("rent","Rent & Housing","🏠",const Color(0xFF14B8A6)),Cat("savings","Savings","💰",const Color(0xFF10B981)),Cat("personal","Personal","✨",const Color(0xFFD946EF)),Cat("gifts","Gifts","🎁",const Color(0xFFF59E0B)),Cat("other","Other","📌",const Color(0xFF64748B))];
-final iCats = <Cat>[Cat("salary","Salary","💼",const Color(0xFF22C55E)),Cat("freelance","Freelance","💻",const Color(0xFF3B82F6)),Cat("business","Business","🏢",const Color(0xFF8B5CF6)),Cat("investment","Investment","📈",const Color(0xFF10B981)),Cat("refund","Refund","↩️",const Color(0xFF06B6D4)),Cat("other_income","Other","💵",const Color(0xFF64748B))];
-final accents = [const Color(0xFF00D4FF),const Color(0xFFA855F7),const Color(0xFF10B981),const Color(0xFFF43F5E),const Color(0xFFF59E0B),const Color(0xFF3B82F6),const Color(0xFF84CC16),const Color(0xFFEC4899)];
-const _scales = [0.8, 0.9, 1.0, 1.15, 1.3];
-const _scaleNames = ['Very Small', 'Small', 'Medium', 'Big', 'Very Big'];
-
-String fmtAmt(double n) => NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 2).format(n);
-String fmtInt(int n) => NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0).format(n);
-Cat? fCat(String id) => [...cats, ...iCats].where((c) => c.id == id).firstOrNull;
 
 // ═══ APP ═══
 
@@ -90,7 +80,7 @@ class _ZenithAppState extends State<ZenithApp> {
   void _sScale(int i) async { final p = await SharedPreferences.getInstance(); setState(() { _scaleIdx = i.clamp(0, 4); p.setInt('font_scale', _scaleIdx); }); }
 
   @override Widget build(BuildContext context) {
-    final scale = _scales[_scaleIdx];
+    final scale = scales[_scaleIdx];
     return MaterialApp(title: 'Zenith', debugShowCheckedModeBanner: false, themeMode: _mode,
       builder: (context, child) => MediaQuery(data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(scale)), child: child!),
       theme: ThemeData(brightness: Brightness.light, colorSchemeSeed: _accent, useMaterial3: true, scaffoldBackgroundColor: const Color(0xFFF5F5F7), textTheme: GoogleFonts.outfitTextTheme(ThemeData.light().textTheme)),
@@ -250,77 +240,11 @@ class _ShellState extends State<Shell> {
 
 // ═══ PAINTERS ═══
 
-class _PiePainter extends CustomPainter {
-  final List<MapEntry<Cat, double>> data; final double total; final Color bg;
-  _PiePainter(this.data, this.total, this.bg);
-  @override void paint(Canvas canvas, Size size) {
-    final c = Offset(size.width / 2, size.height / 2); final r = size.width / 2 - 2; double a = -math.pi / 2;
-    for (var e in data) { final sw = total > 0 ? (e.value / total) * 2 * math.pi : 0.0; canvas.drawArc(Rect.fromCircle(center: c, radius: r), a, sw, true, Paint()..color = e.key.color); a += sw; }
-    canvas.drawCircle(c, r * 0.55, Paint()..color = bg);
-  }
-  @override bool shouldRepaint(covariant CustomPainter o) => true;
-}
 
-class _TrendPainter extends CustomPainter {
-  final List<double> pts; final Color color;
-  _TrendPainter(this.pts, this.color);
-  @override void paint(Canvas canvas, Size size) {
-    if (pts.length < 2) return; final mx = pts.reduce(math.max); if (mx == 0) return;
-    final lp = Paint()..color = color..strokeWidth = 2..style = PaintingStyle.stroke..strokeCap = StrokeCap.round;
-    final fp = Paint()..shader = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [color.withOpacity(0.25), color.withOpacity(0.0)]).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
-    final gp = Paint()..color = color.withOpacity(0.06)..strokeWidth = 0.5;
-    for (int i = 1; i < 4; i++) canvas.drawLine(Offset(0, size.height * i / 4), Offset(size.width, size.height * i / 4), gp);
-    final path = Path(); final fill = Path();
-    for (int i = 0; i < pts.length; i++) {
-      final x = size.width * i / (pts.length - 1); final y = size.height * 0.92 - (pts[i] / mx * size.height * 0.85);
-      if (i == 0) { path.moveTo(x, y); fill.moveTo(x, size.height); fill.lineTo(x, y); } else { path.lineTo(x, y); fill.lineTo(x, y); }
-      if (i == pts.length - 1) canvas.drawCircle(Offset(x, y), 3.5, Paint()..color = color);
-    }
-    fill.lineTo(size.width, size.height); fill.close();
-    canvas.drawPath(fill, fp); canvas.drawPath(path, lp);
-    final step = pts.length > 15 ? 5 : pts.length > 7 ? 3 : 1;
-    for (int i = 0; i < pts.length; i += step) {
-      final x = size.width * i / (pts.length - 1);
-      final tp = TextPainter(text: TextSpan(text: '${i + 1}', style: TextStyle(fontSize: 7, color: color.withOpacity(0.35))), textDirection: TextDirection.ltr)..layout();
-      tp.paint(canvas, Offset(x - tp.width / 2, size.height + 2));
-    }
-  }
-  @override bool shouldRepaint(covariant CustomPainter o) => true;
-}
 
 // ═══ HELPERS ═══
 
-Widget _tile(Txn t, ColorScheme cs, {VoidCallback? onTap}) {
-  final c = fCat(t.category); final isI = t.type == 'income';
-  return GestureDetector(onTap: onTap, child: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
-    child: Row(children: [
-      Container(width: 44, height: 44, decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: (c?.color ?? const Color(0xFF64748B)).withOpacity(0.12)), child: Center(child: Text(c?.icon ?? '📌', style: const TextStyle(fontSize: 20)))),
-      const SizedBox(width: 12),
-      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(t.merchant, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
-        const SizedBox(height: 3),
-        Text('${c?.name ?? "Other"} · ${DateFormat.jm().format(t.date)}', style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.4))),
-        if (t.note.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 2), child: Text(t.note, style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.3), fontStyle: FontStyle.italic), maxLines: 1, overflow: TextOverflow.ellipsis))])),
-      Text(isI ? '+${fmtAmt(t.amount)}' : '-${fmtAmt(t.amount)}', style: GoogleFonts.jetBrainsMono(fontSize: 15, fontWeight: FontWeight.w800, color: isI ? const Color(0xFF34D399) : const Color(0xFFEF4444)))])));
-}
 
-List<Widget> _grouped(List<Txn> txns, ColorScheme cs, ValueChanged<Txn> onTap, {int limit = 20, ValueChanged<Txn>? onDelete}) {
-  final w = <Widget>[]; String? last;
-  for (final t in txns.take(limit)) {
-    final d = DateFormat('EEEE, d MMM').format(t.date);
-    if (d != last) { last = d; final l = DateUtils.isSameDay(t.date, DateTime.now()) ? 'Today' : DateUtils.isSameDay(t.date, DateTime.now().subtract(const Duration(days: 1))) ? 'Yesterday' : d;
-      w.add(Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 6), child: Text(l, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.45))))); }
-    w.add(Dismissible(key: Key(t.id),
-      background: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: const Color(0xFF3B82F6).withOpacity(0.15)),
-        alignment: Alignment.centerLeft, padding: const EdgeInsets.only(left: 24), child: const Icon(Icons.edit_rounded, color: Color(0xFF3B82F6), size: 22)),
-      secondaryBackground: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: const Color(0xFFEF4444).withOpacity(0.15)),
-        alignment: Alignment.centerRight, padding: const EdgeInsets.only(right: 24), child: const Icon(Icons.delete_rounded, color: Color(0xFFEF4444), size: 22)),
-      confirmDismiss: (dir) async { if (dir == DismissDirection.startToEnd) { HapticFeedback.lightImpact(); onTap(t); return false; } return true; },
-      onDismissed: (_) => onDelete?.call(t),
-      child: _tile(t, cs, onTap: () => onTap(t)))); }
-  return w;
-}
 
 // ═══ HOME ═══
 
@@ -371,7 +295,7 @@ class _Home extends StatelessWidget {
           Row(children: [_ms('In', '+${fmtAmt(tInc)}', const Color(0xFF22C55E), cs), const SizedBox(width: 14), _ms('Out', '-${fmtAmt(tExp)}', const Color(0xFFF43F5E), cs)])])),
       if (txns.isNotEmpty) Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(12), decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: accent.withOpacity(0.06)),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('💡', style: TextStyle(fontSize: 14)), const SizedBox(width: 8), Expanded(child: Text(_ins(), style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.65), height: 1.4)))])),
-      ..._grouped(txns, cs, onTap, limit: 20, onDelete: onDelete),
+      ...buildGrouped(txns, cs, onTap, limit: 20, onDelete: onDelete),
       if (txns.isEmpty) Padding(padding: const EdgeInsets.fromLTRB(32, 48, 32, 32), child: Column(children: [
         Icon(Icons.receipt_long_rounded, size: 48, color: cs.onSurface.withOpacity(0.12)),
         const SizedBox(height: 16),
@@ -411,7 +335,7 @@ class _Activity extends StatelessWidget {
         Text('No activity yet', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.4))),
         const SizedBox(height: 6),
         Text('Transactions will show up here\nas you spend', textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.25)))])),
-      ..._grouped(txns, cs, onTap, limit: 200, onDelete: onDelete)]));
+      ...buildGrouped(txns, cs, onTap, limit: 200, onDelete: onDelete)]));
   }
 }
 
@@ -497,10 +421,10 @@ class _StatsTab extends StatelessWidget {
             Text(fmtAmt(cumR), style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: const Color(0xFFF43F5E)))]),
           Text('Day 1 → Day $dp', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.3))),
           const SizedBox(height: 10),
-          SizedBox(height: 90, child: CustomPaint(size: const Size(double.infinity, 90), painter: _TrendPainter(cum, accent)))])),
+          SizedBox(height: 90, child: CustomPaint(size: const Size(double.infinity, 90), painter: TrendPainter(cum, accent)))])),
       if (pie.isNotEmpty) ...[
         Padding(padding: const EdgeInsets.fromLTRB(18, 16, 18, 8), child: Text('BREAKDOWN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.35), letterSpacing: 1))),
-        Center(child: SizedBox(width: 160, height: 160, child: CustomPaint(painter: _PiePainter(pie, tExp, Theme.of(context).scaffoldBackgroundColor)))),
+        Center(child: SizedBox(width: 160, height: 160, child: CustomPaint(painter: PiePainter(pie, tExp, Theme.of(context).scaffoldBackgroundColor)))),
         const SizedBox(height: 12),
         ...pie.map((e) { final p = tExp > 0 ? (e.value / tExp * 100).round() : 0; final cb = catB[e.key.id] ?? 0;
           return Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 3), child: Row(children: [
@@ -566,7 +490,7 @@ class _SettingsState extends State<_Settings> {
       Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Display Size', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
-          Text(_scaleNames[widget.scaleIdx], style: TextStyle(fontSize: 13, color: widget.accent, fontWeight: FontWeight.w600)),
+          Text(scaleNames[widget.scaleIdx], style: TextStyle(fontSize: 13, color: widget.accent, fontWeight: FontWeight.w600)),
           const SizedBox(height: 12),
           Row(children: [Text('Aa', style: TextStyle(fontSize: 12, color: cs.onSurface.withOpacity(0.4))),
             Expanded(child: Slider(value: widget.scaleIdx.toDouble(), min: 0, max: 4, divisions: 4, activeColor: widget.accent, onChanged: (v) => widget.sScale(v.round()))),
