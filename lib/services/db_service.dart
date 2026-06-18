@@ -92,9 +92,19 @@ class Db {
     return r.isNotEmpty ? r.first['category'] as String? : null;
   }
 
-  // Hard-write: forces a learned mapping with auto_enabled=1.
-  // Used by the notification opt-in flow where the user explicitly ticks the
-  // "auto-categorize this merchant" toggle in the categorization sheet.
+  // True when no row exists (default state for new merchants) or the row has
+  // auto_enabled=1. False only when the user has explicitly stopped learning.
+  static Future<bool> isAutoEnabled(String m) async {
+    final k = merchantKey(m);
+    if (k.isEmpty) return true;
+    final r = await (await db)
+        .query('merchant_map', where: 'merchant=?', whereArgs: [k]);
+    if (r.isEmpty) return true;
+    return (r.first['auto_enabled'] as int? ?? 1) == 1;
+  }
+
+  // Hard-write: forces a learned mapping with auto_enabled=1. Used by the
+  // notification opt-in flow AND by "Start learning again" in the Edit sheet.
   static Future<void> setAutoCat(String m, String c) async {
     final k = merchantKey(m);
     if (k.isEmpty) return;
