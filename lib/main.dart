@@ -135,15 +135,15 @@ class _ShellState extends State<Shell> {
       await _load(); if (ctx.mounted) Navigator.pop(ctx); }));
 
   void _showAdd() => showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
-    builder: (ctx) => _AddSheet(accent: widget.accent, onAdd: (t) async { await Db.insTxn(t.toMap()); await _load(); if (ctx.mounted) Navigator.pop(ctx); }));
+    builder: (ctx) => _AddSheet(accent: widget.accent, onAdd: (t) async { await Db.insTxn(t.toMap()); if (t.type == 'expense' && t.merchant.trim().isNotEmpty && t.category.isNotEmpty) await Db.learnMerchant(t.merchant, t.category); await _load(); if (ctx.mounted) Navigator.pop(ctx); }));
 
   void _showEdit(Txn t) => showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
     builder: (ctx) => _EditSheet(txn: t, accent: widget.accent,
-      onSave: (u) async { await Db.updTxn(u.toMap()); await _load(); if (ctx.mounted) Navigator.pop(ctx); _snack('Changes saved', bg: const Color(0xFF34D399).withOpacity(0.85)); },
+      onSave: (u) async { await Db.updTxn(u.toMap()); if (u.type == 'expense' && u.merchant.trim().isNotEmpty && u.category.isNotEmpty) await Db.learnMerchant(u.merchant, u.category); await _load(); if (ctx.mounted) Navigator.pop(ctx); _snack('Changes saved', bg: const Color(0xFF34D399).withOpacity(0.85)); },
       onDelete: () async { final saved = t.toMap(); await Db.delTxn(t.id); await _load(); if (ctx.mounted) Navigator.pop(ctx);
         _snack('Transaction deleted', bg: const Color(0xFFEF4444).withOpacity(0.85), action: SnackBarAction(label: 'UNDO', textColor: Colors.white, onPressed: () async { HapticFeedback.lightImpact(); await Db.insTxn(saved); await _load(); }), seconds: 4); },
       onStopAuto: () async { await Db.stopAuto(t.merchant); await _load(); if (ctx.mounted) Navigator.pop(ctx);
-        _snack('Auto stopped for ${t.merchant}'); }));
+        _snack('Stopped learning ${t.merchant}'); }));
 
   void _delTxn(Txn t) async {
     HapticFeedback.mediumImpact(); final saved = t.toMap();
@@ -450,6 +450,14 @@ class _StatsTab extends StatelessWidget {
     final wd = List<double>.filled(7, 0);
     for (var t in txns.where((t) => t.type == 'expense' && t.date.month == now.month && t.date.year == now.year)) wd[t.date.weekday - 1] += t.amount;
     final maxWd = wd.fold(0.0, math.max);
+    final mm = <String, double>{};
+    final mDisp = <String, String>{};
+    for (var t in txns.where((t) => t.type == 'expense' && t.date.month == now.month && t.date.year == now.year)) { final k = Db.merchantKey(t.merchant); if (k.isEmpty) continue; mm[k] = (mm[k] ?? 0) + t.amount; mDisp[k] ??= Db.merchantDisplay(t.merchant); }
+    final top5 = (mm.entries.toList()..sort((a, b) => b.value.compareTo(a.value))).take(5).toList();
+    final byM = <String, List<Txn>>{};
+    for (var t in txns.where((t) => t.type == 'expense')) { final k = Db.merchantKey(t.merchant); if (k.isEmpty) continue; (byM[k] ??= []).add(t); }
+    final recurring = <String>{};
+    byM.forEach((m, list) { if (list.length < 3) return; final s = [...list]..sort((a, b) => a.date.compareTo(b.date)); final amts = s.map((t) => t.amount).toList(); final avg = amts.reduce((a, b) => a + b) / amts.length; if (avg <= 0) return; if (!amts.every((a) => (a - avg).abs() / avg <= 0.2)) return; final gaps = <int>[]; for (var i = 1; i < s.length; i++) gaps.add(s[i].date.difference(s[i-1].date).inDays); final ag = gaps.reduce((a, b) => a + b) / gaps.length; if (!gaps.every((g) => (g - ag).abs() <= 4)) return; if ((ag >= 25 && ag <= 35) || (ag >= 6 && ag <= 8)) recurring.add(m); });
 
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
       Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 14), child: Text('Analytics', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
@@ -515,6 +523,15 @@ class _StatsTab extends StatelessWidget {
             cb > 0 ? Text('${fmtAmt(e.value)}/${fmtInt(cb)}', style: GoogleFonts.jetBrainsMono(fontSize: 10, color: e.value > cb ? const Color(0xFFF43F5E) : cs.onSurface.withOpacity(0.4)))
               : Text(fmtAmt(e.value), style: GoogleFonts.jetBrainsMono(fontSize: 10, fontWeight: FontWeight.w700, color: e.key.color)),
             const SizedBox(width: 8), SizedBox(width: 32, child: Text('$p%', style: GoogleFonts.jetBrainsMono(fontSize: 10, color: cs.onSurface.withOpacity(0.35)), textAlign: TextAlign.right))])); })],
+      if (top5.isNotEmpty) Container(margin: const EdgeInsets.fromLTRB(16, 14, 16, 0), padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('Top merchants', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)), Text(DateFormat('MMMM').format(now), style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.3)))]),
+          const SizedBox(height: 10),
+          ...top5.map((e) { final isRec = recurring.contains(e.key); return Padding(padding: const EdgeInsets.symmetric(vertical: 5), child: Row(children: [
+            Expanded(child: Row(children: [
+              Flexible(child: Text(mDisp[e.key] ?? e.key, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis)),
+              if (isRec) Padding(padding: const EdgeInsets.only(left: 8), child: Container(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2), decoration: BoxDecoration(borderRadius: BorderRadius.circular(6), color: accent.withOpacity(0.12)), child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.autorenew_rounded, size: 10, color: accent), const SizedBox(width: 3), Text('Recurring', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: accent))])))])),
+            Text(fmtAmt(e.value), style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface))])); })])),
       if (txns.isNotEmpty) Container(margin: const EdgeInsets.fromLTRB(16, 14, 16, 0), padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: accent.withOpacity(0.06)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [const Text('🧠', style: TextStyle(fontSize: 16)), const SizedBox(width: 8), Text('AI Overview', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: accent))]), const SizedBox(height: 8),
@@ -676,7 +693,7 @@ class _AddSheet extends StatefulWidget {
   @override State<_AddSheet> createState() => _AddSheetState();
 }
 class _AddSheetState extends State<_AddSheet> {
-  bool _exp = true; String _amt = '', _merch = '', _cat = '', _note = '';
+  bool _exp = true; String _amt = '', _merch = '', _cat = '', _note = ''; bool _suggested = false;
 DateTime _date = DateTime.now();
 bool _use24h = false;
 
@@ -702,7 +719,7 @@ void initState() {
         TextField(keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (v) => setState(() => _amt = v), style: GoogleFonts.jetBrainsMono(fontSize: 28, fontWeight: FontWeight.w800),
           decoration: InputDecoration(hintText: '₹ 0', filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
         const SizedBox(height: 10),
-        TextField(onChanged: (v) => setState(() => _merch = v), decoration: InputDecoration(hintText: _exp ? 'Merchant' : 'Source', filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
+        TextField(onChanged: (v) async { setState(() { _merch = v; _suggested = false; }); if (_exp && v.trim().length >= 2 && _cat.isEmpty) { final auto = await Db.getAutoCat(v.trim()); if (mounted && auto != null && _cat.isEmpty) setState(() { _cat = auto; _suggested = true; }); } }, decoration: InputDecoration(hintText: _exp ? 'Merchant' : 'Source', suffixIcon: _suggested ? Tooltip(message: 'Suggested from history', child: Icon(Icons.auto_awesome_rounded, size: 16, color: widget.accent)) : null, filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
         const SizedBox(height: 10),
         TextField(onChanged: (v) => _note = v, decoration: InputDecoration(hintText: 'Note (optional)', prefixIcon: Icon(Icons.edit_note_rounded, color: cs.onSurface.withOpacity(0.3)), filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
         const SizedBox(height: 10),
@@ -755,7 +772,7 @@ class _EditSheetState extends State<_EditSheet> {
       child: ListView(padding: const EdgeInsets.fromLTRB(18, 12, 18, 34), children: [
         Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: cs.outline.withOpacity(0.3), borderRadius: BorderRadius.circular(2)))), const SizedBox(height: 16),
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('Edit', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: cs.onSurface)),
-          Row(children: [TextButton(onPressed: () { HapticFeedback.lightImpact(); widget.onStopAuto(); }, child: Text('Stop Auto', style: TextStyle(color: cs.onSurface.withOpacity(0.4), fontSize: 12))),
+          Row(children: [TextButton(onPressed: () { HapticFeedback.lightImpact(); widget.onStopAuto(); }, child: Text('Stop learning', style: TextStyle(color: cs.onSurface.withOpacity(0.4), fontSize: 12))),
             TextButton(onPressed: () { HapticFeedback.mediumImpact(); widget.onDelete(); }, child: const Text('Delete', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.w700, fontSize: 12)))])]),
         const SizedBox(height: 8),
         Text(isI ? '+${fmtAmt(widget.txn.amount)}' : '-${fmtAmt(widget.txn.amount)}', style: GoogleFonts.jetBrainsMono(fontSize: 26, fontWeight: FontWeight.w800, color: isI ? const Color(0xFF22C55E) : cs.onSurface)),
