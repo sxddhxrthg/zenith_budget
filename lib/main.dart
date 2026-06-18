@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart' hide TextDirection;
@@ -674,7 +675,18 @@ class _AddSheet extends StatefulWidget {
 }
 class _AddSheetState extends State<_AddSheet> {
   bool _exp = true; String _amt = '', _merch = '', _cat = '', _note = '';
-  DateTime _date = DateTime.now();
+DateTime _date = DateTime.now();
+bool _use24h = false;
+
+@override
+void initState() {
+  super.initState();
+  SharedPreferences.getInstance().then((p) {
+    if (mounted) {
+      setState(() => _use24h = p.getBool('time_format_24h') ?? false);
+    }
+  });
+}
   @override Widget build(BuildContext context) { final cs = Theme.of(context).colorScheme; final cl = _exp ? cats : iCats; final ok = _amt.isNotEmpty && _merch.isNotEmpty && _cat.isNotEmpty;
     return Container(constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.88), decoration: BoxDecoration(color: cs.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
       child: ListView(padding: const EdgeInsets.fromLTRB(18, 12, 18, 34), children: [
@@ -692,7 +704,11 @@ class _AddSheetState extends State<_AddSheet> {
         const SizedBox(height: 10),
         TextField(onChanged: (v) => _note = v, decoration: InputDecoration(hintText: 'Note (optional)', prefixIcon: Icon(Icons.edit_note_rounded, color: cs.onSurface.withOpacity(0.3)), filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
         const SizedBox(height: 10),
-        GestureDetector(onTap: () async { HapticFeedback.lightImpact(); final picked = await showDatePicker(context: context, initialDate: _date, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365 * 5)), builder: (ctx, child) => Theme(data: Theme.of(ctx).copyWith(colorScheme: ColorScheme.dark(primary: widget.accent, onPrimary: Colors.white, surface: cs.surface, onSurface: cs.onSurface)), child: child!)); if (picked != null) setState(() => _date = DateTime(picked.year, picked.month, picked.day, _date.hour, _date.minute, _date.second)); }, child: Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12), decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: cs.outline.withOpacity(0.05), border: Border.all(color: cs.outline.withOpacity(0.08))), child: Row(children: [Icon(Icons.calendar_today_rounded, size: 16, color: widget.accent), const SizedBox(width: 10), Text(DateFormat('EEE, d MMM yyyy').format(_date), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface)), const Spacer(), Text('Change', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4), fontWeight: FontWeight.w600))]))),
+        Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: cs.outline.withOpacity(0.05), border: Border.all(color: cs.outline.withOpacity(0.08))), child: Row(children: [
+          Expanded(child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () async { HapticFeedback.lightImpact(); final picked = await showDatePicker(context: context, initialDate: _date, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365 * 5)), builder: (ctx, child) => Theme(data: Theme.of(ctx).copyWith(colorScheme: ColorScheme.dark(primary: widget.accent, onPrimary: Colors.white, surface: cs.surface, onSurface: cs.onSurface)), child: child!)); if (picked != null) setState(() => _date = DateTime(picked.year, picked.month, picked.day, _date.hour, _date.minute, _date.second)); }, child: Padding(padding: const EdgeInsets.fromLTRB(14, 12, 10, 12), child: Row(children: [Icon(Icons.calendar_today_rounded, size: 15, color: widget.accent), const SizedBox(width: 10), Flexible(child: Text(DateFormat('EEE, d MMM yyyy').format(_date), style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis))])))),
+          Container(width: 1, height: 22, color: cs.outline.withOpacity(0.1)),
+          GestureDetector(behavior: HitTestBehavior.opaque, onTap: _pickTime, child: Padding(padding: const EdgeInsets.fromLTRB(12, 12, 14, 12), child: Row(children: [Icon(Icons.access_time_rounded, size: 15, color: widget.accent), const SizedBox(width: 8), Text(DateFormat(_use24h ? 'HH:mm' : 'h:mm a').format(_date), style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: cs.onSurface))]))),
+        ])),
         const SizedBox(height: 14),
         GridView.builder(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, mainAxisSpacing: 7, crossAxisSpacing: 7, childAspectRatio: 1.15), itemCount: cl.length,
           itemBuilder: (_, i) { final c = cl[i]; final sel = _cat == c.id;
@@ -706,6 +722,20 @@ class _AddSheetState extends State<_AddSheet> {
         } : null,
           style: ElevatedButton.styleFrom(backgroundColor: widget.accent, foregroundColor: Colors.white, padding: const EdgeInsets.all(16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
           child: Text('Add ${_exp ? "Expense" : "Income"}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)))]));
+  }
+  Future<void> _pickTime() async {
+    HapticFeedback.lightImpact();
+    final cs = Theme.of(context).colorScheme;
+    DateTime temp = _date;
+    await showModalBottomSheet(context: context, backgroundColor: cs.surface, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))), builder: (ctx) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
+      const SizedBox(height: 12),
+      Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: cs.outline.withOpacity(0.3), borderRadius: BorderRadius.circular(2)))),
+      const SizedBox(height: 10),
+      Text('Select Time', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: cs.onSurface)),
+      const SizedBox(height: 4),
+      SizedBox(height: 220, child: CupertinoTheme(data: CupertinoThemeData(brightness: Theme.of(ctx).brightness, textTheme: CupertinoTextThemeData(dateTimePickerTextStyle: GoogleFonts.jetBrainsMono(fontSize: 20, fontWeight: FontWeight.w600, color: cs.onSurface))), child: CupertinoDatePicker(mode: CupertinoDatePickerMode.time, initialDateTime: _date, use24hFormat: _use24h, onDateTimeChanged: (d) => temp = d))),
+      Padding(padding: const EdgeInsets.fromLTRB(16, 12, 16, 18), child: SizedBox(width: double.infinity, child: ElevatedButton(onPressed: () { HapticFeedback.selectionClick(); setState(() => _date = DateTime(_date.year, _date.month, _date.day, temp.hour, temp.minute)); Navigator.pop(ctx); }, style: ElevatedButton.styleFrom(backgroundColor: widget.accent, foregroundColor: Colors.white, padding: const EdgeInsets.all(14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: const Text('Done', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14))))),
+    ])));
   }
 }
 
