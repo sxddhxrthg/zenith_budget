@@ -297,20 +297,100 @@ class _Home extends StatelessWidget {
 
 // ═══ ACTIVITY ═══
 
-class _Activity extends StatelessWidget {
+class _Activity extends StatefulWidget {
   final List<Txn> txns; final ValueChanged<Txn> onTap, onDelete;
   const _Activity({required this.txns, required this.onTap, required this.onDelete});
+  @override State<_Activity> createState() => _ActivityState();
+}
+
+class _ActivityState extends State<_Activity> {
+  final _qCtl = TextEditingController(); String _q = ''; String _type = 'all';
+  final Set<String> _cats = {}; final Set<String> _accs = {}; DateTimeRange? _range;
+
+  @override void dispose() { _qCtl.dispose(); super.dispose(); }
+
+  List<Txn> get _filtered { final q = _q.trim().toLowerCase();
+    return widget.txns.where((t) {
+      if (_type != 'all' && t.type != _type) return false;
+      if (_cats.isNotEmpty && !_cats.contains(t.category)) return false;
+      if (_accs.isNotEmpty && !_accs.contains(t.account)) return false;
+      if (_range != null) { final d = DateUtils.dateOnly(t.date); if (d.isBefore(DateUtils.dateOnly(_range!.start)) || d.isAfter(DateUtils.dateOnly(_range!.end))) return false; }
+      if (q.isNotEmpty) { final cn = fCat(t.category)?.name.toLowerCase() ?? ''; if (!t.merchant.toLowerCase().contains(q) && !t.note.toLowerCase().contains(q) && !cn.contains(q)) return false; }
+      return true; }).toList();
+  }
+
+  bool get _hasFilter => _q.isNotEmpty || _type != 'all' || _cats.isNotEmpty || _accs.isNotEmpty || _range != null;
+  void _clear() { HapticFeedback.lightImpact(); setState(() { _qCtl.clear(); _q = ''; _type = 'all'; _cats.clear(); _accs.clear(); _range = null; }); }
+
+  Future<void> _pickRange() async { final now = DateTime.now();
+    final r = await showDateRangePicker(context: context, firstDate: DateTime(now.year - 5), lastDate: DateTime(now.year + 1), initialDateRange: _range);
+    if (r != null) setState(() => _range = r);
+  }
+
+  void _pickType() { showModalBottomSheet(context: context, backgroundColor: Colors.transparent, builder: (ctx) { final cs = Theme.of(ctx).colorScheme; final ac = Theme.of(context).colorScheme.primary;
+    return Container(decoration: BoxDecoration(color: cs.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))), padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 16), decoration: BoxDecoration(color: cs.onSurface.withOpacity(0.15), borderRadius: BorderRadius.circular(2))),
+        const Text('Type', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 8),
+        ...['all','expense','income'].map((t) => ListTile(contentPadding: EdgeInsets.zero, title: Text(t == 'all' ? 'All' : t == 'expense' ? 'Expense' : 'Income', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+          trailing: _type == t ? Icon(Icons.check_rounded, color: ac) : null,
+          onTap: () { HapticFeedback.selectionClick(); setState(() => _type = t); Navigator.pop(ctx); }))])); }); }
+
+  void _pickMulti(String title, Set<String> sel, List<MapEntry<String, String>> opts) {
+    showModalBottomSheet(context: context, backgroundColor: Colors.transparent, isScrollControlled: true, builder: (ctx) { final cs = Theme.of(ctx).colorScheme; final ac = Theme.of(context).colorScheme.primary;
+      return StatefulBuilder(builder: (ctx, setSt) => Container(decoration: BoxDecoration(color: cs.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
+        padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 32), constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.7),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 16), decoration: BoxDecoration(color: cs.onSurface.withOpacity(0.15), borderRadius: BorderRadius.circular(2))),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            if (sel.isNotEmpty) TextButton(onPressed: () { HapticFeedback.lightImpact(); setSt(() => sel.clear()); setState(() {}); }, child: const Text('Clear', style: TextStyle(fontWeight: FontWeight.w600)))]),
+          const SizedBox(height: 8),
+          Flexible(child: SingleChildScrollView(child: Wrap(spacing: 8, runSpacing: 8, children: opts.map((o) { final on = sel.contains(o.key);
+            return GestureDetector(onTap: () { HapticFeedback.selectionClick(); setSt(() { on ? sel.remove(o.key) : sel.add(o.key); }); setState(() {}); },
+              child: Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10), decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), color: on ? ac.withOpacity(0.15) : cs.outline.withOpacity(0.06), border: Border.all(color: on ? ac : Colors.transparent, width: 1)),
+                child: Text(o.value, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: on ? ac : cs.onSurface)))); }).toList())))]))); });
+  }
+
+  Widget _chip(ColorScheme cs, String label, bool active, IconData icon, VoidCallback onTap) { final ac = Theme.of(context).colorScheme.primary;
+    return GestureDetector(onTap: () { HapticFeedback.lightImpact(); onTap(); }, child: Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8), decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), color: active ? ac.withOpacity(0.15) : cs.outline.withOpacity(0.06), border: Border.all(color: active ? ac.withOpacity(0.6) : Colors.transparent, width: 1)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 14, color: active ? ac : cs.onSurface.withOpacity(0.6)), const SizedBox(width: 6), Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: active ? ac : cs.onSurface.withOpacity(0.75)))])));
+  }
+
+  String _accLbl(String a) => a == 'gpay' ? 'GPay' : a == 'bank' ? 'Bank' : a == 'cash' ? 'Cash' : a[0].toUpperCase() + a.substring(1);
+
   @override Widget build(BuildContext context) { final cs = Theme.of(context).colorScheme;
-    return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
-      Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 4), child: Text('Activity', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
-      Padding(padding: const EdgeInsets.fromLTRB(20, 0, 20, 8), child: Text('${txns.length} transaction${txns.length == 1 ? '' : 's'}', style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.4)))),
-      if (txns.isEmpty) Padding(padding: const EdgeInsets.fromLTRB(32, 48, 32, 32), child: Column(children: [
-        Icon(Icons.swap_vert_rounded, size: 48, color: cs.onSurface.withOpacity(0.12)),
-        const SizedBox(height: 16),
-        Text('No activity yet', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.4))),
-        const SizedBox(height: 6),
-        Text('Transactions will show up here\nas you spend', textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.25)))])),
-      ...buildGrouped(txns, cs, onTap, limit: 200, onDelete: onDelete)]));
+    final filtered = _filtered;
+    final cats = widget.txns.map((t) => t.category).toSet().toList();
+    final accs = widget.txns.map((t) => t.account).toSet().toList();
+    return SafeArea(child: Column(children: [
+      Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 4), child: Row(children: [
+        Expanded(child: Text('Activity', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
+        if (_hasFilter) TextButton(onPressed: _clear, child: const Text('Clear', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)))])),
+      Padding(padding: const EdgeInsets.fromLTRB(20, 0, 20, 12), child: Text(_hasFilter ? '${filtered.length} of ${widget.txns.length} transaction${widget.txns.length == 1 ? '' : 's'}' : '${widget.txns.length} transaction${widget.txns.length == 1 ? '' : 's'}', style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.4)))),
+      Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 10), child: Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.outline.withOpacity(0.06)),
+        child: TextField(controller: _qCtl, onChanged: (v) => setState(() => _q = v), style: TextStyle(fontSize: 14, color: cs.onSurface),
+          decoration: InputDecoration(hintText: 'Search merchant, note, category…', hintStyle: TextStyle(fontSize: 14, color: cs.onSurface.withOpacity(0.35)), prefixIcon: Icon(Icons.search_rounded, color: cs.onSurface.withOpacity(0.4), size: 20),
+            suffixIcon: _q.isNotEmpty ? IconButton(icon: Icon(Icons.close_rounded, color: cs.onSurface.withOpacity(0.4), size: 18), onPressed: () { HapticFeedback.lightImpact(); _qCtl.clear(); setState(() => _q = ''); }) : null,
+            border: InputBorder.none, contentPadding: const EdgeInsets.symmetric(vertical: 12))))),
+      SizedBox(height: 36, child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 16), children: [
+        _chip(cs, _type == 'expense' ? 'Expense' : _type == 'income' ? 'Income' : 'Type', _type != 'all', Icons.swap_vert_rounded, _pickType),
+        const SizedBox(width: 8),
+        _chip(cs, _cats.isEmpty ? 'Category' : '${_cats.length} categor${_cats.length == 1 ? "y" : "ies"}', _cats.isNotEmpty, Icons.category_rounded, () => _pickMulti('Categories', _cats, cats.map((c) { final cc = fCat(c); return MapEntry(c, '${cc?.icon ?? "📌"}  ${cc?.name ?? c}'); }).toList())),
+        const SizedBox(width: 8),
+        _chip(cs, _accs.isEmpty ? 'Account' : '${_accs.length} account${_accs.length == 1 ? "" : "s"}', _accs.isNotEmpty, Icons.account_balance_wallet_rounded, () => _pickMulti('Accounts', _accs, accs.map((a) => MapEntry(a, _accLbl(a))).toList())),
+        const SizedBox(width: 8),
+        _chip(cs, _range == null ? 'Date' : '${DateFormat('d MMM').format(_range!.start)} – ${DateFormat('d MMM').format(_range!.end)}', _range != null, Icons.calendar_today_rounded, _pickRange)])),
+      const SizedBox(height: 6),
+      Expanded(child: filtered.isEmpty
+        ? Padding(padding: const EdgeInsets.fromLTRB(32, 48, 32, 32), child: Column(children: [
+            Icon(_hasFilter ? Icons.search_off_rounded : Icons.swap_vert_rounded, size: 48, color: cs.onSurface.withOpacity(0.12)),
+            const SizedBox(height: 16),
+            Text(_hasFilter ? 'No matches' : 'No activity yet', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.4))),
+            const SizedBox(height: 6),
+            Text(_hasFilter ? 'Try a different search or clear filters' : 'Transactions will show up here\nas you spend', textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.25)))]))
+        : ListView(padding: const EdgeInsets.only(bottom: 120), children: buildGrouped(filtered, cs, widget.onTap, limit: 500, onDelete: widget.onDelete)))]));
   }
 }
 
