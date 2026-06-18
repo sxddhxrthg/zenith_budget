@@ -441,6 +441,13 @@ class _StatsTab extends StatelessWidget {
     final daily = List<double>.filled(dp, 0);
     for (var t in txns.where((t) => t.type == 'expense' && t.date.month == now.month && t.date.year == now.year)) if (t.date.day <= dp) daily[t.date.day - 1] += t.amount;
     final cum = <double>[]; double cumR = 0; for (var d in daily) { cumR += d; cum.add(cumR); }
+    final lmDate = DateTime(now.year, now.month - 1, 1);
+    final tmExp = txns.where((t) => t.type == 'expense' && t.date.year == now.year && t.date.month == now.month).fold(0.0, (s, t) => s + t.amount);
+    final lmExp = txns.where((t) => t.type == 'expense' && t.date.year == lmDate.year && t.date.month == lmDate.month).fold(0.0, (s, t) => s + t.amount);
+    final mom = lmExp > 0 ? ((tmExp - lmExp) / lmExp * 100) : 0.0;
+    final wd = List<double>.filled(7, 0);
+    for (var t in txns.where((t) => t.type == 'expense' && t.date.month == now.month && t.date.year == now.year)) wd[t.date.weekday - 1] += t.amount;
+    final maxWd = wd.fold(0.0, math.max);
 
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
       Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 14), child: Text('Analytics', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
@@ -462,6 +469,12 @@ class _StatsTab extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('${DateFormat('MMMM').format(now)} spending', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
           const SizedBox(height: 8),
+          if (maxWd > 0) Padding(padding: const EdgeInsets.only(bottom: 12), child: Row(children: List.generate(7, (i) { final v = wd[i]; final h = (v / maxWd) * 26; final lbl = ['M','T','W','T','F','S','S'][i]; final isPeak = v == maxWd && v > 0;
+            return Expanded(child: Column(children: [
+              SizedBox(height: 26, child: Align(alignment: Alignment.bottomCenter, child: Container(height: h.clamp(2, 26), margin: const EdgeInsets.symmetric(horizontal: 3), decoration: BoxDecoration(borderRadius: BorderRadius.circular(2), color: accent.withOpacity(isPeak ? 0.85 : 0.25))))),
+              const SizedBox(height: 5),
+              Text(lbl, style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: isPeak ? accent : cs.onSurface.withOpacity(0.3)))]));
+          }))),
           Wrap(spacing: 4, runSpacing: 4, children: List.generate(dim, (i) {
             final day = i + 1; final amt = dayAmt[day] ?? 0; final isToday = day == dp; final isFuture = day > dp;
             final intensity = amt > 0 ? 0.15 + (amt / maxDay) * 0.85 : 0.0;
@@ -477,6 +490,17 @@ class _StatsTab extends StatelessWidget {
           Text('Day 1 → Day $dp', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.3))),
           const SizedBox(height: 10),
           SizedBox(height: 90, child: CustomPaint(size: const Size(double.infinity, 90), painter: TrendPainter(cum, accent)))])),
+      if (lmExp > 0) Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text('Monthly report', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
+            Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4), decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), color: (mom > 0 ? const Color(0xFFF43F5E) : const Color(0xFF10B981)).withOpacity(0.12)),
+              child: Text('${mom > 0 ? '↑' : '↓'} ${mom.abs().toStringAsFixed(0)}%', style: GoogleFonts.jetBrainsMono(fontSize: 11, fontWeight: FontWeight.w700, color: mom > 0 ? const Color(0xFFF43F5E) : const Color(0xFF10B981))))]),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('This month', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))), const SizedBox(height: 3), Text(fmtAmt(tmExp), style: GoogleFonts.jetBrainsMono(fontSize: 17, fontWeight: FontWeight.w800, color: cs.onSurface))])),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(DateFormat('MMMM').format(lmDate), style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))), const SizedBox(height: 3), Text(fmtAmt(lmExp), style: GoogleFonts.jetBrainsMono(fontSize: 17, fontWeight: FontWeight.w800, color: cs.onSurface.withOpacity(0.5)))]))]),
+          if (tmExp > 0 && lmExp > 0) Padding(padding: const EdgeInsets.only(top: 10), child: Text(mom > 0 ? 'You spent ${fmtAmt(tmExp - lmExp)} more than ${DateFormat('MMMM').format(lmDate)}.' : 'You saved ${fmtAmt(lmExp - tmExp)} compared to ${DateFormat('MMMM').format(lmDate)}.', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.5))))])),
       if (pie.isNotEmpty) ...[
         Padding(padding: const EdgeInsets.fromLTRB(18, 16, 18, 8), child: Text('BREAKDOWN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.35), letterSpacing: 1))),
         Center(child: SizedBox(width: 160, height: 160, child: CustomPaint(painter: PiePainter(pie, tExp, Theme.of(context).scaffoldBackgroundColor)))),
@@ -500,15 +524,28 @@ class _StatsTab extends StatelessWidget {
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(l, style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))), const SizedBox(height: 4), Text(v, style: GoogleFonts.jetBrainsMono(fontSize: 16, fontWeight: FontWeight.w800, color: c))]))));
 
   String _ai() {
-    final dp = DateTime.now().day; final dl = DateUtils.getDaysInMonth(DateTime.now().year, DateTime.now().month) - dp;
-    final da = dp > 0 && tExp > 0 ? tExp / dp : 0.0; final proj = da * DateUtils.getDaysInMonth(DateTime.now().year, DateTime.now().month);
+    final now = DateTime.now(); final dim = DateUtils.getDaysInMonth(now.year, now.month);
+    final dp = now.day; final dl = dim - dp;
+    final da = dp > 0 && tExp > 0 ? tExp / dp : 0.0; final proj = da * dim;
     if (tExp == 0) return 'No expenses recorded yet. Add transactions to see spending insights.';
     final ec = txns.where((t) => t.type == 'expense').length;
+    final mExp = txns.where((t) => t.type == 'expense' && t.date.month == now.month && t.date.year == now.year).toList();
     final p = <String>[];
     p.add('$ec expenses, avg ${fmtAmt(tExp / ec)} each.');
     if (monthBud > 0) p.add(proj > monthBud ? '⚠️ Projected ${fmtAmt(proj)} exceeds ${fmtInt(monthBud)} budget.' : '✅ On track: ${fmtAmt(proj)} projected of ${fmtInt(monthBud)}.');
     if (tInc > 0) p.add('Savings: ${((tInc - tExp) / tInc * 100).round()}%.');
     if (dl > 0 && monthBud > 0 && monthBud > tExp) p.add('${fmtAmt((monthBud - tExp) / dl)}/day for remaining $dl days.');
+    if (mExp.isNotEmpty) {
+      final big = mExp.reduce((a, b) => a.amount > b.amount ? a : b);
+      p.add('💸 Biggest this month: ${fmtAmt(big.amount)} on ${DateFormat('MMM d').format(big.date)}.');
+      final w = List<double>.filled(7, 0); for (var t in mExp) w[t.date.weekday - 1] += t.amount;
+      final mx = w.reduce(math.max);
+      if (mx > 0) { final pk = w.indexOf(mx); const names = ['Mondays','Tuesdays','Wednesdays','Thursdays','Fridays','Saturdays','Sundays']; p.add('📅 You spend most on ${names[pk]}.'); }
+    }
+    final wkAgo = now.subtract(const Duration(days: 7)); final twoWkAgo = now.subtract(const Duration(days: 14));
+    final tw = txns.where((t) => t.type == 'expense' && t.date.isAfter(wkAgo)).fold(0.0, (s, t) => s + t.amount);
+    final pw = txns.where((t) => t.type == 'expense' && t.date.isAfter(twoWkAgo) && t.date.isBefore(wkAgo)).fold(0.0, (s, t) => s + t.amount);
+    if (pw > 0) { final d = ((tw - pw) / pw * 100).round(); p.add('${d > 0 ? '📈' : '📉'} This week ${d > 0 ? 'up' : 'down'} ${d.abs()}% vs last week.'); }
     return p.join('\n');
   }
 }
