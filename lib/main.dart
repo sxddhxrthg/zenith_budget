@@ -674,6 +674,7 @@ class _AddSheet extends StatefulWidget {
 }
 class _AddSheetState extends State<_AddSheet> {
   bool _exp = true; String _amt = '', _merch = '', _cat = '', _note = '';
+  DateTime _date = DateTime.now();
   @override Widget build(BuildContext context) { final cs = Theme.of(context).colorScheme; final cl = _exp ? cats : iCats; final ok = _amt.isNotEmpty && _merch.isNotEmpty && _cat.isNotEmpty;
     return Container(constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.88), decoration: BoxDecoration(color: cs.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
       child: ListView(padding: const EdgeInsets.fromLTRB(18, 12, 18, 34), children: [
@@ -690,6 +691,8 @@ class _AddSheetState extends State<_AddSheet> {
         TextField(onChanged: (v) => setState(() => _merch = v), decoration: InputDecoration(hintText: _exp ? 'Merchant' : 'Source', filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
         const SizedBox(height: 10),
         TextField(onChanged: (v) => _note = v, decoration: InputDecoration(hintText: 'Note (optional)', prefixIcon: Icon(Icons.edit_note_rounded, color: cs.onSurface.withOpacity(0.3)), filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
+        const SizedBox(height: 10),
+        GestureDetector(onTap: () async { HapticFeedback.lightImpact(); final picked = await showDatePicker(context: context, initialDate: _date, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365 * 5)), builder: (ctx, child) => Theme(data: Theme.of(ctx).copyWith(colorScheme: ColorScheme.dark(primary: widget.accent, onPrimary: Colors.white, surface: cs.surface, onSurface: cs.onSurface)), child: child!)); if (picked != null) setState(() => _date = DateTime(picked.year, picked.month, picked.day, _date.hour, _date.minute, _date.second)); }, child: Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12), decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: cs.outline.withOpacity(0.05), border: Border.all(color: cs.outline.withOpacity(0.08))), child: Row(children: [Icon(Icons.calendar_today_rounded, size: 16, color: widget.accent), const SizedBox(width: 10), Text(DateFormat('EEE, d MMM yyyy').format(_date), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface)), const Spacer(), Text('Change', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4), fontWeight: FontWeight.w600))]))),
         const SizedBox(height: 14),
         GridView.builder(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, mainAxisSpacing: 7, crossAxisSpacing: 7, childAspectRatio: 1.15), itemCount: cl.length,
           itemBuilder: (_, i) { final c = cl[i]; final sel = _cat == c.id;
@@ -699,7 +702,7 @@ class _AddSheetState extends State<_AddSheet> {
         ElevatedButton(onPressed: ok ? () {
           final amount = double.tryParse(_amt.replaceAll(',','').replaceAll(' ','')) ?? 0;
           if (amount <= 0) return;
-          widget.onAdd(Txn(id: DateTime.now().millisecondsSinceEpoch.toString(), amount: amount, merchant: _merch, category: _cat, account: 'gpay', type: _exp ? 'expense' : 'income', date: DateTime.now(), note: _note));
+          widget.onAdd(Txn(id: DateTime.now().millisecondsSinceEpoch.toString(), amount: amount, merchant: _merch, category: _cat, account: 'gpay', type: _exp ? 'expense' : 'income', date: _date, note: _note));
         } : null,
           style: ElevatedButton.styleFrom(backgroundColor: widget.accent, foregroundColor: Colors.white, padding: const EdgeInsets.all(16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
           child: Text('Add ${_exp ? "Expense" : "Income"}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)))]));
