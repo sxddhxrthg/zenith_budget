@@ -16,7 +16,7 @@ Widget buildTile(Txn t, ColorScheme cs, {VoidCallback? onTap}) {
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(t.merchant, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
         const SizedBox(height: 3),
-        Text('${c?.name ?? "Other"} · ${DateFormat.jm().format(t.date)}', style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.4))),
+        Text('${c?.name ?? "Other"} · ${fmtTxnTime(t.date)}', style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.4))),
         if (t.note.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 2), child: Text(t.note, style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.3), fontStyle: FontStyle.italic), maxLines: 1, overflow: TextOverflow.ellipsis))])),
       Text(isI ? '+${fmtAmt(t.amount)}' : '-${fmtAmt(t.amount)}', style: GoogleFonts.jetBrainsMono(fontSize: 15, fontWeight: FontWeight.w800, color: isI ? const Color(0xFF34D399) : const Color(0xFFEF4444)))])));
 }

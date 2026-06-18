@@ -23,6 +23,7 @@ import 'services/notification_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try { await Firebase.initializeApp(); } catch (_) {}
+  await TimePref.load();
   runApp(const ZenithApp());
 }
 
@@ -576,7 +577,8 @@ class _SettingsState extends State<_Settings> {
       _row('Notification Access', Icons.notifications_rounded, widget.notifOk ? 'Enabled' : 'Disabled', widget.onNotif, cs, sc: widget.notifOk ? const Color(0xFF34D399) : const Color(0xFFEF4444)),
       // ── APPEARANCE ──
       _sec('APPEARANCE', Icons.palette_rounded, cs),
-      _row('Theme', widget.isDark ? Icons.dark_mode_rounded : Icons.wb_sunny_rounded, widget.isDark ? 'Dark' : 'Light', widget.tTheme, cs),
+     _row('Theme', widget.isDark ? Icons.dark_mode_rounded : Icons.wb_sunny_rounded, widget.isDark ? 'Dark' : 'Light', widget.tTheme, cs),
+      _tog('24-hour Time', Icons.schedule_rounded, TimePref.use24h, (v) async { HapticFeedback.lightImpact(); await TimePref.set(v); setState(() {}); }, cs),
       Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(16), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Accent Color', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)), const SizedBox(height: 14),
           Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: List.generate(8, (i) { final c = accents[i]; return GestureDetector(onTap: () { HapticFeedback.lightImpact(); widget.sAccent(i); }, child: Container(width: 36, height: 36, decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(12), border: Border.all(color: c.value == widget.accent.value ? cs.onSurface : Colors.transparent, width: 2.5)), child: c.value == widget.accent.value ? const Icon(Icons.check, color: Colors.white, size: 16) : null)); }))])),
@@ -707,7 +709,7 @@ void initState() {
         Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: cs.outline.withOpacity(0.05), border: Border.all(color: cs.outline.withOpacity(0.08))), child: Row(children: [
           Expanded(child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () async { HapticFeedback.lightImpact(); final picked = await showDatePicker(context: context, initialDate: _date, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365 * 5)), builder: (ctx, child) => Theme(data: Theme.of(ctx).copyWith(colorScheme: ColorScheme.dark(primary: widget.accent, onPrimary: Colors.white, surface: cs.surface, onSurface: cs.onSurface)), child: child!)); if (picked != null) setState(() => _date = DateTime(picked.year, picked.month, picked.day, _date.hour, _date.minute, _date.second)); }, child: Padding(padding: const EdgeInsets.fromLTRB(14, 12, 10, 12), child: Row(children: [Icon(Icons.calendar_today_rounded, size: 15, color: widget.accent), const SizedBox(width: 10), Flexible(child: Text(DateFormat('EEE, d MMM yyyy').format(_date), style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis))])))),
           Container(width: 1, height: 22, color: cs.outline.withOpacity(0.1)),
-          GestureDetector(behavior: HitTestBehavior.opaque, onTap: _pickTime, child: Padding(padding: const EdgeInsets.fromLTRB(12, 12, 14, 12), child: Row(children: [Icon(Icons.access_time_rounded, size: 15, color: widget.accent), const SizedBox(width: 8), Text(DateFormat(_use24h ? 'HH:mm' : 'h:mm a').format(_date), style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: cs.onSurface))]))),
+          GestureDetector(behavior: HitTestBehavior.opaque, onTap: _pickTime, child: Padding(padding: const EdgeInsets.fromLTRB(12, 12, 14, 12), child: Row(children: [Icon(Icons.access_time_rounded, size: 15, color: widget.accent), const SizedBox(width: 8), Text(fmtTxnTime(_date), style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: cs.onSurface))]))),
         ])),
         const SizedBox(height: 14),
         GridView.builder(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, mainAxisSpacing: 7, crossAxisSpacing: 7, childAspectRatio: 1.15), itemCount: cl.length,
@@ -745,8 +747,8 @@ class _EditSheet extends StatefulWidget {
   @override State<_EditSheet> createState() => _EditSheetState();
 }
 class _EditSheetState extends State<_EditSheet> {
-  late String _cat, _note; late TextEditingController _nc;
-  @override void initState() { super.initState(); _cat = widget.txn.category; _note = widget.txn.note; _nc = TextEditingController(text: _note); }
+  late String _cat, _note; late TextEditingController _nc; late DateTime _date; bool _use24h = false;
+  @override void initState() { super.initState(); _cat = widget.txn.category; _note = widget.txn.note; _nc = TextEditingController(text: _note); _date = widget.txn.date; SharedPreferences.getInstance().then((p) { if (mounted) setState(() => _use24h = p.getBool('time_format_24h') ?? false); }); }
   @override Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme; final isI = widget.txn.type == 'income'; final cl = isI ? iCats : cats;
     return Container(constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.78), decoration: BoxDecoration(color: cs.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
@@ -757,7 +759,13 @@ class _EditSheetState extends State<_EditSheet> {
             TextButton(onPressed: () { HapticFeedback.mediumImpact(); widget.onDelete(); }, child: const Text('Delete', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.w700, fontSize: 12)))])]),
         const SizedBox(height: 8),
         Text(isI ? '+${fmtAmt(widget.txn.amount)}' : '-${fmtAmt(widget.txn.amount)}', style: GoogleFonts.jetBrainsMono(fontSize: 26, fontWeight: FontWeight.w800, color: isI ? const Color(0xFF22C55E) : cs.onSurface)),
-        Text('${widget.txn.merchant} · ${DateFormat('MMM d, h:mm a').format(widget.txn.date)}', style: TextStyle(fontSize: 12, color: cs.onSurface.withOpacity(0.5))),
+        Text(widget.txn.merchant, style: TextStyle(fontSize: 12, color: cs.onSurface.withOpacity(0.5))),
+        const SizedBox(height: 12),
+        Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: cs.outline.withOpacity(0.05), border: Border.all(color: cs.outline.withOpacity(0.08))), child: Row(children: [
+          Expanded(child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () async { HapticFeedback.lightImpact(); final picked = await showDatePicker(context: context, initialDate: _date, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365 * 5)), builder: (ctx, child) => Theme(data: Theme.of(ctx).copyWith(colorScheme: ColorScheme.dark(primary: widget.accent, onPrimary: Colors.white, surface: cs.surface, onSurface: cs.onSurface)), child: child!)); if (picked != null) setState(() => _date = DateTime(picked.year, picked.month, picked.day, _date.hour, _date.minute, _date.second)); }, child: Padding(padding: const EdgeInsets.fromLTRB(14, 12, 10, 12), child: Row(children: [Icon(Icons.calendar_today_rounded, size: 15, color: widget.accent), const SizedBox(width: 10), Flexible(child: Text(DateFormat('EEE, d MMM yyyy').format(_date), style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis))])))),
+          Container(width: 1, height: 22, color: cs.outline.withOpacity(0.1)),
+          GestureDetector(behavior: HitTestBehavior.opaque, onTap: _pickTime, child: Padding(padding: const EdgeInsets.fromLTRB(12, 12, 14, 12), child: Row(children: [Icon(Icons.access_time_rounded, size: 15, color: widget.accent), const SizedBox(width: 8), Text(fmtTxnTime(_date), style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: cs.onSurface))]))),
+        ])),
         const SizedBox(height: 12),
         TextField(controller: _nc, onChanged: (v) => _note = v, decoration: InputDecoration(hintText: 'Note', prefixIcon: Icon(Icons.edit_note_rounded, color: cs.onSurface.withOpacity(0.3)), filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
         const SizedBox(height: 12),
@@ -766,8 +774,22 @@ class _EditSheetState extends State<_EditSheet> {
             return GestureDetector(onTap: () => setState(() => _cat = c.id), child: Container(decoration: BoxDecoration(color: sel ? c.color.withOpacity(0.15) : cs.outline.withOpacity(0.04), borderRadius: BorderRadius.circular(10), border: Border.all(color: sel ? c.color.withOpacity(0.4) : cs.outline.withOpacity(0.08))),
               child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text(c.icon, style: const TextStyle(fontSize: 20)), const SizedBox(height: 3), Text(c.name, style: TextStyle(fontSize: 9, color: sel ? c.color : cs.onSurface.withOpacity(0.5), fontWeight: sel ? FontWeight.w700 : FontWeight.w400), textAlign: TextAlign.center, maxLines: 2)]))); }),
         const SizedBox(height: 16),
-        ElevatedButton(onPressed: () => widget.onSave(Txn(id: widget.txn.id, amount: widget.txn.amount, merchant: widget.txn.merchant, category: _cat, account: widget.txn.account, type: widget.txn.type, date: widget.txn.date, note: _note)),
+        ElevatedButton(onPressed: () => widget.onSave(Txn(id: widget.txn.id, amount: widget.txn.amount, merchant: widget.txn.merchant, category: _cat, account: widget.txn.account, type: widget.txn.type, date: _date, note: _note)),
           style: ElevatedButton.styleFrom(backgroundColor: widget.accent, foregroundColor: Colors.white, padding: const EdgeInsets.all(16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
           child: const Text('Save Changes', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)))]));
+  }
+  Future<void> _pickTime() async {
+    HapticFeedback.lightImpact();
+    final cs = Theme.of(context).colorScheme;
+    DateTime temp = _date;
+    await showModalBottomSheet(context: context, backgroundColor: cs.surface, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))), builder: (ctx) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
+      const SizedBox(height: 12),
+      Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: cs.outline.withOpacity(0.3), borderRadius: BorderRadius.circular(2)))),
+      const SizedBox(height: 10),
+      Text('Select Time', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: cs.onSurface)),
+      const SizedBox(height: 4),
+      SizedBox(height: 220, child: CupertinoTheme(data: CupertinoThemeData(brightness: Theme.of(ctx).brightness, textTheme: CupertinoTextThemeData(dateTimePickerTextStyle: GoogleFonts.jetBrainsMono(fontSize: 20, fontWeight: FontWeight.w600, color: cs.onSurface))), child: CupertinoDatePicker(mode: CupertinoDatePickerMode.time, initialDateTime: _date, use24hFormat: _use24h, onDateTimeChanged: (d) => temp = d))),
+      Padding(padding: const EdgeInsets.fromLTRB(16, 12, 16, 18), child: SizedBox(width: double.infinity, child: ElevatedButton(onPressed: () { HapticFeedback.selectionClick(); setState(() => _date = DateTime(_date.year, _date.month, _date.day, temp.hour, temp.minute)); Navigator.pop(ctx); }, style: ElevatedButton.styleFrom(backgroundColor: widget.accent, foregroundColor: Colors.white, padding: const EdgeInsets.all(14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: const Text('Done', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14))))),
+    ])));
   }
 }
