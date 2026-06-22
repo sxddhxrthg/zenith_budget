@@ -648,6 +648,66 @@ class _StatsTab extends StatelessWidget {
               Flexible(child: Text(mDisp[e.key] ?? e.key, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis)),
               if (isRec) Padding(padding: const EdgeInsets.only(left: 8), child: Container(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2), decoration: BoxDecoration(borderRadius: BorderRadius.circular(6), color: accent.withOpacity(0.12)), child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.autorenew_rounded, size: 10, color: accent), const SizedBox(width: 3), Text('Recurring', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: accent))])))])),
             Text(fmtAmt(e.value), style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface))])); })])),
+      // ── P2.6.1 Spending shifts (this month vs last month by category) ──────
+      Builder(builder: (_) {
+        // Per-category totals for this month and last month
+        final catTm = <String, double>{};
+        final catLm = <String, double>{};
+        for (final t in txns.where((t) => t.type == 'expense')) {
+          if (t.date.year == now.year && t.date.month == now.month) {
+            catTm[t.category] = (catTm[t.category] ?? 0) + t.amount;
+          } else if (t.date.year == lmDate.year && t.date.month == lmDate.month) {
+            catLm[t.category] = (catLm[t.category] ?? 0) + t.amount;
+          }
+        }
+        // Union of categories with spend in either month
+        final allCats = {...catTm.keys, ...catLm.keys};
+        // Build deltas; ignore zero-in-both and tiny changes (<₹100)
+        final deltas = allCats.map((id) {
+          final tm = catTm[id] ?? 0.0;
+          final lm = catLm[id] ?? 0.0;
+          return MapEntry(id, tm - lm);
+        }).where((e) => e.value.abs() >= 100).toList()
+          ..sort((a, b) => b.value.abs().compareTo(a.value.abs()));
+        final shifts = deltas.take(5).toList();
+        if (shifts.isEmpty) return const SizedBox.shrink();
+        return Container(
+          margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              Text('Spending shifts', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
+              Text('vs ${DateFormat('MMM').format(lmDate)}', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.3))),
+            ]),
+            const SizedBox(height: 10),
+            ...shifts.map((e) {
+              final cat = fCat(e.key);
+              final isUp = e.value > 0;
+              final color = isUp ? const Color(0xFFF43F5E) : const Color(0xFF22C55E);
+              final arrow = isUp ? '↑' : '↓';
+              final tm = catTm[e.key] ?? 0.0;
+              final lm = catLm[e.key] ?? 0.0;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: Row(children: [
+                  if (cat != null) Text(cat.icon, style: const TextStyle(fontSize: 16)),
+                  const SizedBox(width: 8),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(cat?.name ?? e.key, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface)),
+                    Text('${fmtAmt(lm)} → ${fmtAmt(tm)}', style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.4))),
+                  ])),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), color: color.withOpacity(0.10)),
+                    child: Text('$arrow ${fmtAmt(e.value.abs())}', style: GoogleFonts.jetBrainsMono(fontSize: 11, fontWeight: FontWeight.w700, color: color)),
+                  ),
+                ]),
+              );
+            }),
+          ]),
+        );
+      }),
       if (txns.isNotEmpty) Container(margin: const EdgeInsets.fromLTRB(16, 14, 16, 0), padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: accent.withOpacity(0.06)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [const Text('🧠', style: TextStyle(fontSize: 16)), const SizedBox(width: 8), Text('AI Overview', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: accent))]), const SizedBox(height: 8),
