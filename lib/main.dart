@@ -78,6 +78,9 @@ class _ShellState extends State<Shell> {
   List<Txn> _txns = [];
   Map<String, int> _catB = {};
   int _monthBud = 0;
+  // P2.7.2 — approved subscription keys (persisted) + session-only "Not now".
+  Set<String> _approvedSubs = {};
+  final Set<String> _dismissedSubs = {};
   StreamSubscription? _sub;
   bool _notifOk = false, _loading = true, _asked = false;
 
@@ -89,8 +92,23 @@ class _ShellState extends State<Shell> {
     final rows = await Db.allTxns();
     final cb = await Db.catBudgets();
     final mb = await getMonthlyBudget();
-    if (mounted) setState(() { _txns = rows.map((m) => Txn.fromMap(m)).toList(); _catB = cb; _monthBud = mb; _loading = false; });
+    final pr = await SharedPreferences.getInstance();
+    final appr = pr.getStringList('approved_subs') ?? const [];
+    if (mounted) setState(() { _txns = rows.map((m) => Txn.fromMap(m)).toList(); _catB = cb; _monthBud = mb; _approvedSubs = appr.toSet(); _loading = false; });
   }
+
+  // P2.7.2 — persist approval. Merchant stops being suggested; it stays recurring
+  // (detection untouched) and continues to appear in the Subscriptions card.
+  Future<void> _approveSub(String key) async {
+    HapticFeedback.lightImpact();
+    final pr = await SharedPreferences.getInstance();
+    final cur = (pr.getStringList('approved_subs') ?? const []).toSet()..add(key);
+    await pr.setStringList('approved_subs', cur.toList());
+    await _load();
+  }
+
+  // Session-only dismiss — no persistence, recurrence detection unaffected.
+  void _dismissSub(String key) { HapticFeedback.lightImpact(); setState(() => _dismissedSubs.add(key)); }
 
   void _listen() {
     _sub = NB.stream.listen((data) async {
@@ -222,7 +240,7 @@ class _ShellState extends State<Shell> {
       _Home(txns: _txns, catB: _catB, monthBud: _monthBud, accent: widget.accent, name: widget.name, tExp: tExp, tInc: tInc, notifOk: _notifOk, onNotif: () { NB.openNotif(); Future.delayed(const Duration(seconds: 3), _checkNotif); }, onAdd: _showAdd, onTap: _showEdit, onEditBud: _editMonthBud, onDelete: _delTxn),
       _Activity(txns: _txns, onTap: _showEdit, onDelete: _delTxn),
       _BudgetsTab(txns: _txns, catB: _catB, monthBud: _monthBud, accent: widget.accent, onEditTotal: _editMonthBud, onEditCat: _editCatBud),
-      _StatsTab(txns: _txns, accent: widget.accent, tExp: tExp, tInc: tInc, catB: _catB, monthBud: _monthBud),
+      _StatsTab(txns: _txns, accent: widget.accent, tExp: tExp, tInc: tInc, catB: _catB, monthBud: _monthBud, approvedSubs: _approvedSubs, dismissedSubs: _dismissedSubs, onApproveSub: _approveSub, onDismissSub: _dismissSub),
       _Settings(accent: widget.accent, isDark: widget.isDark, notifOk: _notifOk, scaleIdx: widget.scaleIdx, tTheme: widget.tTheme, sAccent: widget.sAccent, sScale: widget.sScale, onNotif: () { NB.openNotif(); Future.delayed(const Duration(seconds: 3), _checkNotif); }),
     ];
     return Scaffold(body: Stack(children: [
@@ -549,7 +567,8 @@ class _BudgetsTabState extends State<_BudgetsTab> {
 
 class _StatsTab extends StatelessWidget {
   final List<Txn> txns; final Color accent; final double tExp, tInc; final Map<String, int> catB; final int monthBud;
-  const _StatsTab({required this.txns, required this.accent, required this.tExp, required this.tInc, required this.catB, required this.monthBud});
+  final Set<String> approvedSubs; final Set<String> dismissedSubs; final Future<void> Function(String) onApproveSub; final void Function(String) onDismissSub;
+  const _StatsTab({required this.txns, required this.accent, required this.tExp, required this.tInc, required this.catB, required this.monthBud, required this.approvedSubs, required this.dismissedSubs, required this.onApproveSub, required this.onDismissSub});
   @override Widget build(BuildContext context) { final cs = Theme.of(context).colorScheme;
     final now = DateTime.now(); final dim = DateUtils.getDaysInMonth(now.year, now.month);
     final dp = now.day; final dl = dim - dp;
@@ -816,6 +835,36 @@ class _StatsTab extends StatelessWidget {
                 ]),
               );
             }),
+          ]),
+        );
+      }),
+      // ── P2.7.2 Recurring-payment suggestion (first unacknowledged merchant) ─
+      Builder(builder: (_) {
+        final pend = recurMeta.entries
+            .where((e) => !approvedSubs.contains(e.key) && !dismissedSubs.contains(e.key))
+            .toList()..sort((a, b) => b.value.monthly.compareTo(a.value.monthly));
+        if (pend.isEmpty) return const SizedBox.shrink();
+        final e = pend.first;
+        return Container(
+          margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: accent.withOpacity(0.06), border: Border.all(color: accent.withOpacity(0.18))),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Icon(Icons.autorenew_rounded, size: 16, color: accent),
+              const SizedBox(width: 8),
+              Text('Recurring payment detected', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: accent)),
+            ]),
+            const SizedBox(height: 10),
+            Text(e.value.disp, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis),
+            const SizedBox(height: 2),
+            Text('~${fmtAmt(e.value.monthly)} / month${e.value.weekly ? ' · billed weekly' : ''}', style: TextStyle(fontSize: 12, color: cs.onSurface.withOpacity(0.5))),
+            const SizedBox(height: 12),
+            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+              TextButton(onPressed: () => onDismissSub(e.key), child: Text('Not now', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.5)))),
+              const SizedBox(width: 4),
+              ElevatedButton(onPressed: () => onApproveSub(e.key), style: ElevatedButton.styleFrom(backgroundColor: accent, foregroundColor: Colors.white, elevation: 0, padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))), child: const Text('Add', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700))),
+            ]),
           ]),
         );
       }),
