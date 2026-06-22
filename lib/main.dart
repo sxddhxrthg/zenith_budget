@@ -708,6 +708,50 @@ class _StatsTab extends StatelessWidget {
           ]),
         );
       }),
+      // ── P2.6.2 Spending concentration (top categories by share this month) ──
+      Builder(builder: (_) {
+        // Reuse `pie`: already month-scoped expenses per category, value > 0,
+        // sorted descending by amount. Take the top 5.
+        final top = pie.take(5).toList();
+        if (top.isEmpty || tExp <= 0) return const SizedBox.shrink();
+        return Container(
+          margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              Text('Where it goes', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
+              Text(DateFormat('MMMM').format(now), style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.3))),
+            ]),
+            const SizedBox(height: 12),
+            ...top.map((e) {
+              final cat = e.key;
+              final share = (e.value / tExp).clamp(0.0, 1.0);
+              final pct = (share * 100).round();
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Text(cat.icon, style: const TextStyle(fontSize: 15)),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(cat.name, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis)),
+                    Text('$pct%', style: GoogleFonts.jetBrainsMono(fontSize: 12, fontWeight: FontWeight.w700, color: cat.color)),
+                    const SizedBox(width: 10),
+                    SizedBox(width: 64, child: Text(fmtAmt(e.value), textAlign: TextAlign.right, style: GoogleFonts.jetBrainsMono(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.55)))),
+                  ]),
+                  const SizedBox(height: 6),
+                  ClipRRect(borderRadius: BorderRadius.circular(3), child: LinearProgressIndicator(
+                    value: share,
+                    minHeight: 5,
+                    backgroundColor: cs.outline.withOpacity(0.08),
+                    valueColor: AlwaysStoppedAnimation(cat.color),
+                  )),
+                ]),
+              );
+            }),
+          ]),
+        );
+      }),
       if (txns.isNotEmpty) Container(margin: const EdgeInsets.fromLTRB(16, 14, 16, 0), padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: accent.withOpacity(0.06)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [const Text('🧠', style: TextStyle(fontSize: 16)), const SizedBox(width: 8), Text('AI Overview', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: accent))]), const SizedBox(height: 8),
