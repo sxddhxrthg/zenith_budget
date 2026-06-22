@@ -260,8 +260,16 @@ class _Home extends StatelessWidget {
     final pct = monthBud > 0 ? (tExp / monthBud).clamp(0.0, 1.0) : 0.0;
     final bal = tInc - tExp;
     final daysLeft = DateUtils.getDaysInMonth(DateTime.now().year, DateTime.now().month) - DateTime.now().day;
-    final left = (monthBud - tExp).clamp(0.0, double.infinity);
-    final dailyAllow = daysLeft > 0 && monthBud > 0 ? left / daysLeft : 0.0;
+    final overBudget = monthBud > 0 && tExp > monthBud;
+    final left = overBudget ? 0.0 : (monthBud - tExp).clamp(0.0, double.infinity);
+    final dailyAllow = daysLeft > 0 && monthBud > 0 && !overBudget ? left / daysLeft : 0.0;
+    // Daily allowance color: red if over, amber if tight (< 20% of budget/day), green otherwise
+    final budgetPerDay = monthBud > 0 && daysLeft > 0 ? monthBud / DateUtils.getDaysInMonth(DateTime.now().year, DateTime.now().month) : 0.0;
+    final dailyColor = overBudget
+        ? const Color(0xFFF43F5E)
+        : (dailyAllow > 0 && budgetPerDay > 0 && dailyAllow < budgetPerDay * 0.2)
+            ? const Color(0xFFF59E0B)
+            : const Color(0xFF22C55E);
 
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
       Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 0), child: Text('Hi, $name 👋', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
@@ -282,7 +290,10 @@ class _Home extends StatelessWidget {
                   const SizedBox(height: 8),
                   Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                     Text('${(v * 100).round()}% used', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))),
-                    if (daysLeft > 0 && left > 0) Text('${fmtAmt(dailyAllow)}/day · $daysLeft days left', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4)))])]))])
+                    if (overBudget)
+                      Text('${fmtAmt(tExp - monthBud)} over budget', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFF43F5E)))
+                    else if (daysLeft > 0 && monthBud > 0)
+                      Text('${fmtAmt(dailyAllow)}/day · $daysLeft days left', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: dailyColor))])]))])
           : Column(children: [
               const SizedBox(height: 8),
               Icon(Icons.account_balance_wallet_rounded, size: 32, color: accent.withOpacity(0.5)),
