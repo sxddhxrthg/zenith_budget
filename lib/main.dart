@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
@@ -78,8 +79,11 @@ class _ShellState extends State<Shell> {
   List<Txn> _txns = [];
   Map<String, int> _catB = {};
   int _monthBud = 0;
-  // P2.7.2 — approved subscription keys (persisted) + session-only "Not now".
-  Set<String> _approvedSubs = {};
+  // P2.7.3 — approved subscriptions (persisted as JSON) + session-only "Not now".
+  // A subscription = {key, name, amount, cadence, source}. Detection stays
+  // separate: a merchant is "recurring" automatically but "subscribed" only
+  // once the user approves it (or adds one manually).
+  List<Map<String, dynamic>> _subs = [];
   final Set<String> _dismissedSubs = {};
   StreamSubscription? _sub;
   bool _notifOk = false, _loading = true, _asked = false;
@@ -93,18 +97,81 @@ class _ShellState extends State<Shell> {
     final cb = await Db.catBudgets();
     final mb = await getMonthlyBudget();
     final pr = await SharedPreferences.getInstance();
-    final appr = pr.getStringList('approved_subs') ?? const [];
-    if (mounted) setState(() { _txns = rows.map((m) => Txn.fromMap(m)).toList(); _catB = cb; _monthBud = mb; _approvedSubs = appr.toSet(); _loading = false; });
+    final raw = pr.getString('subscriptions');
+    final subs = <Map<String, dynamic>>[];
+    if (raw != null && raw.isNotEmpty) {
+      try { for (final e in (jsonDecode(raw) as List)) subs.add(Map<String, dynamic>.from(e as Map)); } catch (_) {}
+    }
+    if (mounted) setState(() { _txns = rows.map((m) => Txn.fromMap(m)).toList(); _catB = cb; _monthBud = mb; _subs = subs; _loading = false; });
   }
 
-  // P2.7.2 — persist approval. Merchant stops being suggested; it stays recurring
-  // (detection untouched) and continues to appear in the Subscriptions card.
-  Future<void> _approveSub(String key) async {
-    HapticFeedback.lightImpact();
+  Future<void> _persistSubs() async {
     final pr = await SharedPreferences.getInstance();
-    final cur = (pr.getStringList('approved_subs') ?? const []).toSet()..add(key);
-    await pr.setStringList('approved_subs', cur.toList());
+    await pr.setString('subscriptions', jsonEncode(_subs));
+  }
+
+  // Approve a subscription — from a detection suggestion OR manual entry. Keyed
+  // by merchant key; duplicates ignored. The `recurring` set is never touched:
+  // detected ≠ subscribed.
+  Future<void> _approveSub(Map<String, dynamic> sub) async {
+    HapticFeedback.lightImpact();
+    final key = (sub['key'] as String?) ?? '';
+    if (key.isEmpty || _subs.any((s) => s['key'] == key)) return;
+    _subs = [..._subs, sub];
+    await _persistSubs();
     await _load();
+  }
+
+  // Remove — manual control. Detection is unaffected, so the merchant may
+  // resurface as a suggestion later.
+  Future<void> _removeSub(String key) async {
+    HapticFeedback.lightImpact();
+    _subs = _subs.where((s) => s['key'] != key).toList();
+    await _persistSubs();
+    await _load();
+  }
+
+  // Manual "+ Add Subscription" — always available, independent of automation.
+  Future<void> _addManualSub() async {
+    HapticFeedback.lightImpact();
+    final nameC = TextEditingController();
+    final amtC = TextEditingController();
+    String cadence = 'monthly';
+    final saved = await showModalBottomSheet<bool>(context: context, isScrollControlled: true, backgroundColor: Colors.transparent, builder: (ctx) {
+      final cs = Theme.of(ctx).colorScheme;
+      return StatefulBuilder(builder: (ctx, setSt) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+          decoration: BoxDecoration(color: cs.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(22))),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Center(child: Container(width: 38, height: 4, decoration: BoxDecoration(borderRadius: BorderRadius.circular(2), color: cs.onSurface.withOpacity(0.15)))),
+            const SizedBox(height: 16),
+            Text('Add subscription', style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.w700, color: cs.onSurface)),
+            const SizedBox(height: 16),
+            TextField(controller: nameC, style: TextStyle(color: cs.onSurface), decoration: InputDecoration(labelText: 'Name', hintText: 'e.g. Netflix', filled: true, fillColor: cs.onSurface.withOpacity(0.06), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
+            const SizedBox(height: 12),
+            TextField(controller: amtC, keyboardType: const TextInputType.numberWithOptions(decimal: true), style: TextStyle(color: cs.onSurface), decoration: InputDecoration(labelText: 'Amount', prefixText: '₹ ', filled: true, fillColor: cs.onSurface.withOpacity(0.06), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
+            const SizedBox(height: 12),
+            Row(children: ['weekly', 'monthly', 'yearly'].map((c) { final sel = cadence == c; return Expanded(child: Padding(padding: const EdgeInsets.only(right: 8), child: GestureDetector(onTap: () { HapticFeedback.selectionClick(); setSt(() => cadence = c); }, child: Container(padding: const EdgeInsets.symmetric(vertical: 11), alignment: Alignment.center, decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), color: sel ? widget.accent.withOpacity(0.15) : cs.onSurface.withOpacity(0.04), border: Border.all(color: sel ? widget.accent : Colors.transparent)), child: Text('${c[0].toUpperCase()}${c.substring(1)}', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: sel ? widget.accent : cs.onSurface.withOpacity(0.6))))))); }).toList()),
+            const SizedBox(height: 18),
+            SizedBox(width: double.infinity, child: ElevatedButton(onPressed: () => Navigator.pop(ctx, true), style: ElevatedButton.styleFrom(backgroundColor: widget.accent, foregroundColor: Colors.white, elevation: 0, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: const Text('Save', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)))),
+          ]),
+        ),
+      ));
+    });
+    if (saved == true) {
+      final name = nameC.text.trim();
+      final amt = double.tryParse(amtC.text.replaceAll(',', '').replaceAll('₹', '').trim()) ?? 0;
+      if (name.isNotEmpty && amt > 0) {
+        await _approveSub({'key': Db.merchantKey(name), 'name': Db.merchantDisplay(name), 'amount': amt, 'cadence': cadence, 'source': 'manual'});
+      }
+    }
+    // nameC/amtC are deliberately NOT disposed here. showModalBottomSheet's future
+    // resolves at pop time while the sheet's exit animation is still rebuilding the
+    // TextField (main.dart:152); disposing across the awaited _approveSub above ran
+    // mid-animation and threw "TextEditingController used after disposed". They're
+    // small, transient, and GC-reclaimed once this closure is released.
   }
 
   // Session-only dismiss — no persistence, recurrence detection unaffected.
@@ -240,7 +307,7 @@ class _ShellState extends State<Shell> {
       _Home(txns: _txns, catB: _catB, monthBud: _monthBud, accent: widget.accent, name: widget.name, tExp: tExp, tInc: tInc, notifOk: _notifOk, onNotif: () { NB.openNotif(); Future.delayed(const Duration(seconds: 3), _checkNotif); }, onAdd: _showAdd, onTap: _showEdit, onEditBud: _editMonthBud, onDelete: _delTxn),
       _Activity(txns: _txns, onTap: _showEdit, onDelete: _delTxn),
       _BudgetsTab(txns: _txns, catB: _catB, monthBud: _monthBud, accent: widget.accent, onEditTotal: _editMonthBud, onEditCat: _editCatBud),
-      _StatsTab(txns: _txns, accent: widget.accent, tExp: tExp, tInc: tInc, catB: _catB, monthBud: _monthBud, approvedSubs: _approvedSubs, dismissedSubs: _dismissedSubs, onApproveSub: _approveSub, onDismissSub: _dismissSub),
+      _StatsTab(txns: _txns, accent: widget.accent, tExp: tExp, tInc: tInc, catB: _catB, monthBud: _monthBud, subs: _subs, approvedKeys: _subs.map((s) => s['key'] as String).toSet(), dismissedSubs: _dismissedSubs, onApproveSub: _approveSub, onDismissSub: _dismissSub, onAddManual: _addManualSub, onRemoveSub: _removeSub),
       _Settings(accent: widget.accent, isDark: widget.isDark, notifOk: _notifOk, scaleIdx: widget.scaleIdx, tTheme: widget.tTheme, sAccent: widget.sAccent, sScale: widget.sScale, onNotif: () { NB.openNotif(); Future.delayed(const Duration(seconds: 3), _checkNotif); }),
     ];
     return Scaffold(body: Stack(children: [
@@ -567,8 +634,9 @@ class _BudgetsTabState extends State<_BudgetsTab> {
 
 class _StatsTab extends StatelessWidget {
   final List<Txn> txns; final Color accent; final double tExp, tInc; final Map<String, int> catB; final int monthBud;
-  final Set<String> approvedSubs; final Set<String> dismissedSubs; final Future<void> Function(String) onApproveSub; final void Function(String) onDismissSub;
-  const _StatsTab({required this.txns, required this.accent, required this.tExp, required this.tInc, required this.catB, required this.monthBud, required this.approvedSubs, required this.dismissedSubs, required this.onApproveSub, required this.onDismissSub});
+  final List<Map<String, dynamic>> subs; final Set<String> approvedKeys; final Set<String> dismissedSubs;
+  final Future<void> Function(Map<String, dynamic>) onApproveSub; final void Function(String) onDismissSub; final Future<void> Function() onAddManual; final Future<void> Function(String) onRemoveSub;
+  const _StatsTab({required this.txns, required this.accent, required this.tExp, required this.tInc, required this.catB, required this.monthBud, required this.subs, required this.approvedKeys, required this.dismissedSubs, required this.onApproveSub, required this.onDismissSub, required this.onAddManual, required this.onRemoveSub});
   @override Widget build(BuildContext context) { final cs = Theme.of(context).colorScheme;
     final now = DateTime.now(); final dim = DateUtils.getDaysInMonth(now.year, now.month);
     final dp = now.day; final dl = dim - dp;
@@ -597,11 +665,11 @@ class _StatsTab extends StatelessWidget {
     // is "this merchant recurs". It does not leak into month-scoped totals.
     final byM = <String, List<Txn>>{};
     for (var t in txns.where((t) => t.type == 'expense')) { final k = Db.merchantKey(t.merchant); if (k.isEmpty) continue; (byM[k] ??= []).add(t); }
+    // P2.7.3 — store the representative charge (median) + cadence directly. No
+    // monthly-normalization math: users think in "₹X / month", not formulas.
     final recurring = <String>{};
-    // P2.7.1 — reuse the same detection to capture cadence + est. monthly cost.
-    // recurring-set membership is identical to before; we only record metadata.
-    final recurMeta = <String, ({double monthly, bool weekly, String disp})>{};
-    byM.forEach((m, list) { if (list.length < 3) return; final s = [...list]..sort((a, b) => a.date.compareTo(b.date)); final amts = s.map((t) => t.amount).toList(); final avg = amts.reduce((a, b) => a + b) / amts.length; if (avg <= 0) return; if (!amts.every((a) => (a - avg).abs() / avg <= 0.2)) return; final gaps = <int>[]; for (var i = 1; i < s.length; i++) gaps.add(s[i].date.difference(s[i-1].date).inDays); final ag = gaps.reduce((a, b) => a + b) / gaps.length; if (!gaps.every((g) => (g - ag).abs() <= 4)) return; final weekly = ag >= 6 && ag <= 8; final monthly = ag >= 25 && ag <= 35; if (weekly || monthly) { recurring.add(m); recurMeta[m] = (monthly: avg * (30.44 / ag), weekly: weekly, disp: Db.merchantDisplay(s.last.merchant)); } });
+    final recurMeta = <String, ({double amount, bool weekly, String disp})>{};
+    byM.forEach((m, list) { if (list.length < 3) return; final s = [...list]..sort((a, b) => a.date.compareTo(b.date)); final amts = s.map((t) => t.amount).toList(); final avg = amts.reduce((a, b) => a + b) / amts.length; if (avg <= 0) return; if (!amts.every((a) => (a - avg).abs() / avg <= 0.2)) return; final gaps = <int>[]; for (var i = 1; i < s.length; i++) gaps.add(s[i].date.difference(s[i-1].date).inDays); final ag = gaps.reduce((a, b) => a + b) / gaps.length; if (!gaps.every((g) => (g - ag).abs() <= 4)) return; final weekly = ag >= 6 && ag <= 8; final monthly = ag >= 25 && ag <= 35; if (weekly || monthly) { recurring.add(m); final sa = [...amts]..sort(); recurMeta[m] = (amount: sa[sa.length ~/ 2], weekly: weekly, disp: Db.merchantDisplay(s.last.merchant)); } });
 
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
       Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 14), child: Text('Analytics', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
@@ -838,11 +906,11 @@ class _StatsTab extends StatelessWidget {
           ]),
         );
       }),
-      // ── P2.7.2 Recurring-payment suggestion (first unacknowledged merchant) ─
+      // ── P2.7.2 Recurring-payment suggestion (first unapproved merchant) ────
       Builder(builder: (_) {
         final pend = recurMeta.entries
-            .where((e) => !approvedSubs.contains(e.key) && !dismissedSubs.contains(e.key))
-            .toList()..sort((a, b) => b.value.monthly.compareTo(a.value.monthly));
+            .where((e) => !approvedKeys.contains(e.key) && !dismissedSubs.contains(e.key))
+            .toList()..sort((a, b) => b.value.amount.compareTo(a.value.amount));
         if (pend.isEmpty) return const SizedBox.shrink();
         final e = pend.first;
         return Container(
@@ -858,20 +926,21 @@ class _StatsTab extends StatelessWidget {
             const SizedBox(height: 10),
             Text(e.value.disp, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis),
             const SizedBox(height: 2),
-            Text('~${fmtAmt(e.value.monthly)} / month${e.value.weekly ? ' · billed weekly' : ''}', style: TextStyle(fontSize: 12, color: cs.onSurface.withOpacity(0.5))),
+            Text('${fmtAmt(e.value.amount)} / ${e.value.weekly ? 'week' : 'month'} · add to subscriptions?', style: TextStyle(fontSize: 12, color: cs.onSurface.withOpacity(0.5))),
             const SizedBox(height: 12),
             Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-              TextButton(onPressed: () => onDismissSub(e.key), child: Text('Not now', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.5)))),
+              OutlinedButton(onPressed: () => onDismissSub(e.key), style: OutlinedButton.styleFrom(foregroundColor: cs.onSurface.withOpacity(0.7), side: BorderSide(color: cs.onSurface.withOpacity(0.22)), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))), child: const Text('Not now', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
               const SizedBox(width: 4),
-              ElevatedButton(onPressed: () => onApproveSub(e.key), style: ElevatedButton.styleFrom(backgroundColor: accent, foregroundColor: Colors.white, elevation: 0, padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))), child: const Text('Add', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700))),
+              ElevatedButton(onPressed: () => onApproveSub({'key': e.key, 'name': e.value.disp, 'amount': e.value.amount, 'cadence': e.value.weekly ? 'weekly' : 'monthly', 'source': 'auto'}), style: ElevatedButton.styleFrom(backgroundColor: accent, foregroundColor: Colors.white, elevation: 0, padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))), child: const Text('Add', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700))),
             ]),
           ]),
         );
       }),
-      // ── P2.7.1 Subscriptions (recurring obligations from P2.4 detection) ───
-      if (recurMeta.isNotEmpty) Builder(builder: (_) {
-        final subs = recurMeta.entries.toList()..sort((a, b) => b.value.monthly.compareTo(a.value.monthly));
-        final est = subs.fold(0.0, (s, e) => s + e.value.monthly);
+      // ── P2.7.1/3 Subscriptions — ONLY user-approved subs (auto or manual) ──
+      Builder(builder: (_) {
+        final sorted = [...subs]..sort((a, b) => (b['amount'] as num).compareTo(a['amount'] as num));
+        double monthlyOf(Map<String, dynamic> s) { final a = (s['amount'] as num).toDouble(); switch (s['cadence']) { case 'weekly': return a * 52 / 12; case 'yearly': return a / 12; default: return a; } }
+        final est = sorted.fold(0.0, (t, s) => t + monthlyOf(s));
         return Container(
           margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
           padding: const EdgeInsets.all(14),
@@ -883,19 +952,34 @@ class _StatsTab extends StatelessWidget {
                 const SizedBox(width: 8),
                 Text('Subscriptions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
               ]),
-              Text('~${fmtAmt(est)}/mo', style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: accent)),
+              if (sorted.isNotEmpty) Text('≈ ${fmtInt(est.round())}/mo', style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: accent)),
             ]),
             const SizedBox(height: 4),
-            Text('${subs.length} recurring ${subs.length == 1 ? 'payment' : 'payments'} detected', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))),
+            Text(sorted.isEmpty ? 'No subscriptions yet — approve a detected one or add manually.' : '${sorted.length} active ${sorted.length == 1 ? 'subscription' : 'subscriptions'}', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))),
+            if (sorted.isNotEmpty) const SizedBox(height: 6),
+            ...sorted.map((s) => Padding(padding: const EdgeInsets.symmetric(vertical: 5), child: GestureDetector(
+              onLongPress: () => onRemoveSub(s['key'] as String),
+              behavior: HitTestBehavior.opaque,
+              child: Row(children: [
+                Expanded(child: Row(children: [
+                  Flexible(child: Text(s['name'] as String? ?? '', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis)),
+                  const SizedBox(width: 8),
+                  Container(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2), decoration: BoxDecoration(borderRadius: BorderRadius.circular(6), color: accent.withOpacity(0.12)), child: Text('${(s['cadence'] as String)[0].toUpperCase()}${(s['cadence'] as String).substring(1)}', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: accent))),
+                ])),
+                Text(fmtAmt((s['amount'] as num).toDouble()), style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface)),
+              ]),
+            ))),
             const SizedBox(height: 10),
-            ...subs.map((e) => Padding(padding: const EdgeInsets.symmetric(vertical: 5), child: Row(children: [
-              Expanded(child: Row(children: [
-                Flexible(child: Text(e.value.disp, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis)),
-                const SizedBox(width: 8),
-                Container(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2), decoration: BoxDecoration(borderRadius: BorderRadius.circular(6), color: accent.withOpacity(0.12)), child: Text(e.value.weekly ? 'Weekly' : 'Monthly', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: accent))),
-              ])),
-              Text('~${fmtAmt(e.value.monthly)}', style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface)),
-            ]))),
+            GestureDetector(onTap: onAddManual, behavior: HitTestBehavior.opaque, child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 11), alignment: Alignment.center,
+              decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), border: Border.all(color: accent.withOpacity(0.4), width: 1.2)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.add_rounded, size: 16, color: accent),
+                const SizedBox(width: 6),
+                Text('Add subscription', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: accent)),
+              ]),
+            )),
+            if (sorted.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text('Long-press a subscription to remove it.', style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.3)))),
           ]),
         );
       }),
