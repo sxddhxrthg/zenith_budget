@@ -36,7 +36,6 @@ void main() async {
 
 
 
-
 // ═══ NATIVE BRIDGE ═══
 
 
@@ -104,7 +103,7 @@ class _ShellState extends State<Shell> {
       else {
         final auto = await Db.getAutoCat(merch);
         if (auto != null) { await Db.insTxn(Txn(id: _uid(), amount: amt, merchant: merch, category: auto, account: acc, type: 'expense', date: DateTime.now()).toMap()); await _load();
-          if (mounted) _snack('Auto: ${fmtAmt(amt)} → ${fCat(auto)?.name}', bg: const Color(0xFF34D399).withOpacity(0.85));
+          if (mounted) _snack('Auto: ${fmtAmt(amt)} → ${fCat(auto)?.name}', bg: const Color(0xFF22C55E));
         } else if (mounted) { _showExpCat(amt, merch, acc); }
       }
     });
@@ -135,30 +134,50 @@ class _ShellState extends State<Shell> {
       await _load(); if (ctx.mounted) Navigator.pop(ctx); }));
 
   void _showAdd() => showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
-    builder: (ctx) => _AddSheet(accent: widget.accent, onAdd: (t) async { await Db.insTxn(t.toMap()); if (t.type == 'expense' && t.merchant.trim().isNotEmpty && t.category.isNotEmpty) await Db.learnMerchant(t.merchant, t.category); await _load(); if (ctx.mounted) Navigator.pop(ctx); }));
+    builder: (ctx) => _AddSheet(accent: widget.accent, onAdd: (t) async {
+      await Db.insTxn(t.toMap());
+      if (t.type == 'expense' && t.merchant.trim().isNotEmpty && t.category.isNotEmpty) await Db.learnMerchant(t.merchant, t.category);
+      await _load(); if (ctx.mounted) Navigator.pop(ctx); }));
 
   void _showEdit(Txn t) => showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
     builder: (ctx) => _EditSheet(txn: t, accent: widget.accent,
-      onSave: (u) async { await Db.updTxn(u.toMap()); if (u.type == 'expense' && u.merchant.trim().isNotEmpty && u.category.isNotEmpty) await Db.learnMerchant(u.merchant, u.category); await _load(); if (ctx.mounted) Navigator.pop(ctx); _snack('Changes saved', bg: const Color(0xFF34D399).withOpacity(0.85)); },
+      onSave: (u) async {
+        await Db.updTxn(u.toMap());
+        if (u.type == 'expense' && u.merchant.trim().isNotEmpty && u.category.isNotEmpty) await Db.learnMerchant(u.merchant, u.category);
+        await _load(); if (ctx.mounted) Navigator.pop(ctx);
+        _snack('Changes saved', bg: const Color(0xFF22C55E)); },
       onDelete: () async { final saved = t.toMap(); await Db.delTxn(t.id); await _load(); if (ctx.mounted) Navigator.pop(ctx);
-        _snack('Transaction deleted', bg: const Color(0xFFEF4444).withOpacity(0.85), action: SnackBarAction(label: 'UNDO', textColor: Colors.white, onPressed: () async { HapticFeedback.lightImpact(); await Db.insTxn(saved); await _load(); }), seconds: 4); },
+        _snack('Transaction deleted', bg: const Color(0xFFEF4444), action: SnackBarAction(label: 'UNDO', textColor: Colors.white, onPressed: () async { HapticFeedback.lightImpact(); await Db.insTxn(saved); await _load(); }), seconds: 4); },
       onStopAuto: () async { await Db.stopAuto(t.merchant); await _load(); if (ctx.mounted) Navigator.pop(ctx);
-        _snack('Stopped learning ${t.merchant}'); }));
+        _snack('Stopped learning ${t.merchant}'); },
+      onStartAuto: () async {
+        if (t.category.isEmpty) { _snack('Pick a category first', bg: const Color(0xFFEF4444)); return; }
+        await Db.setAutoCat(t.merchant, t.category); await _load(); if (ctx.mounted) Navigator.pop(ctx);
+        _snack('Learning ${t.merchant} again', bg: const Color(0xFF22C55E)); }));
 
   void _delTxn(Txn t) async {
     HapticFeedback.mediumImpact(); final saved = t.toMap();
     await Db.delTxn(t.id); await _load();
     if (!mounted) return;
-    _snack('Transaction deleted', bg: const Color(0xFFEF4444).withOpacity(0.85), action: SnackBarAction(label: 'UNDO', textColor: Colors.white, onPressed: () async { HapticFeedback.lightImpact(); await Db.insTxn(saved); await _load(); }), seconds: 4);
+    _snack('Transaction deleted', bg: const Color(0xFFEF4444), action: SnackBarAction(label: 'UNDO', textColor: Colors.white, onPressed: () async { HapticFeedback.lightImpact(); await Db.insTxn(saved); await _load(); }), seconds: 4);
   }
 
+  // High-contrast snackbar: default uses inverseSurface (always readable across
+  // every accent + theme); colored variants (green success, red destructive)
+  // use solid fills with white text for clarity.
   void _snack(String msg, {Color? bg, SnackBarAction? action, int seconds = 3}) {
     if (!mounted) return; ScaffoldMessenger.of(context).clearSnackBars();
     final cs = Theme.of(context).colorScheme;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-      backgroundColor: bg ?? cs.surface, behavior: SnackBarBehavior.floating,
+    final fg = bg != null ? Colors.white : cs.onInverseSurface;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: fg)),
+      backgroundColor: bg ?? cs.inverseSurface,
+      behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 88), duration: Duration(seconds: seconds), action: action));
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 88),
+      duration: Duration(seconds: seconds),
+      elevation: 6,
+      action: action));
   }
 
   void _editMonthBud() { final c = TextEditingController(text: _monthBud > 0 ? '$_monthBud' : '');
@@ -185,8 +204,14 @@ class _ShellState extends State<Shell> {
         ElevatedButton(onPressed: () async { HapticFeedback.lightImpact(); final v = int.tryParse(c.text.replaceAll(',','').replaceAll(' ','')) ?? 0; if (v > 0) await Db.setCatBudget(catId, v); else await Db.delCatBudget(catId); await _load(); if (ctx.mounted) Navigator.pop(ctx); },
           style: ElevatedButton.styleFrom(backgroundColor: widget.accent, foregroundColor: Colors.white), child: const Text('Save'))]); }); }
 
-  double get tExp => _txns.where((t) => t.type == 'expense').fold(0.0, (s, t) => s + t.amount);
-  double get tInc => _txns.where((t) => t.type == 'income').fold(0.0, (s, t) => s + t.amount);
+  // ─── Month-scoped totals ───────────────────────────────────────────────
+  // tExp / tInc are misnamed for historical reasons — they always
+  // represent the CURRENT calendar month, not lifetime. Budgets,
+  // balance, projections, and AI insights all assume month semantics.
+  // Historical transactions remain visible in Activity but never
+  // contribute to other months' analytics.
+  double get tExp { final n = DateTime.now(); return _txns.where((t) => t.type == 'expense' && t.date.year == n.year && t.date.month == n.month).fold(0.0, (s, t) => s + t.amount); }
+  double get tInc { final n = DateTime.now(); return _txns.where((t) => t.type == 'income' && t.date.year == n.year && t.date.month == n.month).fold(0.0, (s, t) => s + t.amount); }
 
   @override void dispose() { _sub?.cancel(); super.dispose(); }
   @override Widget build(BuildContext context) {
@@ -287,7 +312,7 @@ class _Home extends StatelessWidget {
   String _ins() {
     final now = DateTime.now(); final dp = now.day; final dl = DateUtils.getDaysInMonth(now.year, now.month) - dp;
     final da = dp > 0 && tExp > 0 ? tExp / dp : 0.0;
-    final top = cats.map((c) => MapEntry(c, txns.where((t) => t.type == 'expense' && t.date.month == now.month && t.category == c.id).fold(0.0, (s, t) => s + t.amount))).where((e) => e.value > 0).toList()..sort((a, b) => b.value.compareTo(a.value));
+    final top = cats.map((c) => MapEntry(c, txns.where((t) => t.type == 'expense' && t.date.year == now.year && t.date.month == now.month && t.category == c.id).fold(0.0, (s, t) => s + t.amount))).where((e) => e.value > 0).toList()..sort((a, b) => b.value.compareTo(a.value));
     if (top.isEmpty) return 'No spending this month yet. Your insights will appear as you spend.';
     final p = <String>[];
     if (monthBud > 0) { final proj = da * DateUtils.getDaysInMonth(now.year, now.month); p.add(proj > monthBud * 1.1 ? 'At this pace: ${fmtAmt(proj)} — ${((proj / monthBud - 1) * 100).round()}% over budget.' : 'On track — ${fmtAmt(monthBud - tExp)} left, $dl days.'); }
@@ -401,7 +426,7 @@ class _ActivityState extends State<_Activity> {
 class _BudgetsTab extends StatelessWidget {
   final List<Txn> txns; final Map<String, int> catB; final int monthBud; final Color accent; final VoidCallback onEditTotal; final ValueChanged<String> onEditCat;
   const _BudgetsTab({required this.txns, required this.catB, required this.monthBud, required this.accent, required this.onEditTotal, required this.onEditCat});
-  @override Widget build(BuildContext context) { final cs = Theme.of(context).colorScheme;
+  @override Widget build(BuildContext context) { final cs = Theme.of(context).colorScheme; final n = DateTime.now();
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
       Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 14), child: Text('Budgets', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
       GestureDetector(onTap: onEditTotal, child: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(18),
@@ -412,7 +437,7 @@ class _BudgetsTab extends StatelessWidget {
           const SizedBox(width: 6), Icon(Icons.edit_rounded, size: 16, color: cs.onSurface.withOpacity(0.3))]))),
       const SizedBox(height: 8),
       Padding(padding: const EdgeInsets.fromLTRB(18, 4, 18, 8), child: Text('Category budgets (optional — tap to set)', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.35)))),
-      ...cats.map((cat) { final bud = catB[cat.id] ?? 0; final spent = txns.where((t) => t.type == 'expense' && t.category == cat.id).fold(0.0, (s, t) => s + t.amount); final pct = bud > 0 ? (spent / bud).clamp(0.0, 1.0) : 0.0;
+      ...cats.map((cat) { final bud = catB[cat.id] ?? 0; final spent = txns.where((t) => t.type == 'expense' && t.category == cat.id && t.date.year == n.year && t.date.month == n.month).fold(0.0, (s, t) => s + t.amount); final pct = bud > 0 ? (spent / bud).clamp(0.0, 1.0) : 0.0;
         return GestureDetector(onTap: () => onEditCat(cat.id), child: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 3), padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
           child: Column(children: [Row(children: [Text(cat.icon, style: const TextStyle(fontSize: 20)), const SizedBox(width: 10),
@@ -429,14 +454,11 @@ class _StatsTab extends StatelessWidget {
   final List<Txn> txns; final Color accent; final double tExp, tInc; final Map<String, int> catB; final int monthBud;
   const _StatsTab({required this.txns, required this.accent, required this.tExp, required this.tInc, required this.catB, required this.monthBud});
   @override Widget build(BuildContext context) { final cs = Theme.of(context).colorScheme;
-    final sr = tInc > 0 ? ((tInc - tExp) / tInc * 100).round() : 0;
     final now = DateTime.now(); final dim = DateUtils.getDaysInMonth(now.year, now.month);
     final dp = now.day; final dl = dim - dp;
     final da = dp > 0 && tExp > 0 ? tExp / dp : 0.0;
     final proj = da * dim;
-    final ec = txns.where((t) => t.type == 'expense').length;
-    final at = ec > 0 ? tExp / ec : 0.0;
-    final pie = cats.map((c) => MapEntry(c, txns.where((t) => t.type == 'expense' && t.category == c.id).fold(0.0, (s, t) => s + t.amount))).where((e) => e.value > 0).toList()..sort((a, b) => b.value.compareTo(a.value));
+    final pie = cats.map((c) => MapEntry(c, txns.where((t) => t.type == 'expense' && t.category == c.id && t.date.year == now.year && t.date.month == now.month).fold(0.0, (s, t) => s + t.amount))).where((e) => e.value > 0).toList()..sort((a, b) => b.value.compareTo(a.value));
     final dayAmt = <int, double>{};
     for (var t in txns.where((t) => t.type == 'expense' && t.date.month == now.month && t.date.year == now.year)) dayAmt[t.date.day] = (dayAmt[t.date.day] ?? 0) + t.amount;
     final maxDay = dayAmt.values.isEmpty ? 1.0 : dayAmt.values.reduce(math.max);
@@ -450,10 +472,13 @@ class _StatsTab extends StatelessWidget {
     final wd = List<double>.filled(7, 0);
     for (var t in txns.where((t) => t.type == 'expense' && t.date.month == now.month && t.date.year == now.year)) wd[t.date.weekday - 1] += t.amount;
     final maxWd = wd.fold(0.0, math.max);
+    // Top merchants this month — case-insensitive grouping, canonical display.
     final mm = <String, double>{};
     final mDisp = <String, String>{};
-    for (var t in txns.where((t) => t.type == 'expense' && t.date.month == now.month && t.date.year == now.year)) { final k = Db.merchantKey(t.merchant); if (k.isEmpty) continue; mm[k] = (mm[k] ?? 0) + t.amount; mDisp[k] ??= Db.merchantDisplay(t.merchant); }
+    for (var t in txns.where((t) => t.type == 'expense' && t.date.year == now.year && t.date.month == now.month)) { final k = Db.merchantKey(t.merchant); if (k.isEmpty) continue; mm[k] = (mm[k] ?? 0) + t.amount; mDisp[k] ??= Db.merchantDisplay(t.merchant); }
     final top5 = (mm.entries.toList()..sort((a, b) => b.value.compareTo(a.value))).take(5).toList();
+    // Recurring detection scans ALL expenses (lifetime) — the pattern itself
+    // is "this merchant recurs". It does not leak into month-scoped totals.
     final byM = <String, List<Txn>>{};
     for (var t in txns.where((t) => t.type == 'expense')) { final k = Db.merchantKey(t.merchant); if (k.isEmpty) continue; (byM[k] ??= []).add(t); }
     final recurring = <String>{};
@@ -461,13 +486,7 @@ class _StatsTab extends StatelessWidget {
 
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
       Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 14), child: Text('Analytics', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
-      Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Row(children: [
-        _sb('Savings', '$sr%', 'Income minus expenses,\ndivided by income', accent, cs),
-        const SizedBox(width: 8),
-        _sb('Daily Avg', fmtAmt(da), 'Total spent this month\ndivided by days passed', const Color(0xFFF97316), cs),
-        const SizedBox(width: 8),
-        _sb('Avg Txn', fmtAmt(at), 'Total spent divided by\nnumber of payments', const Color(0xFF8B5CF6), cs)])),
-      Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
+      Container(margin: const EdgeInsets.fromLTRB(16, 0, 16, 0), padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Projected this month', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
@@ -539,18 +558,15 @@ class _StatsTab extends StatelessWidget {
     ]));
   }
 
-  Widget _sb(String l, String v, String tip, Color c, ColorScheme cs) => Expanded(child: Tooltip(message: tip, child: Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(l, style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))), const SizedBox(height: 4), Text(v, style: GoogleFonts.jetBrainsMono(fontSize: 16, fontWeight: FontWeight.w800, color: c))]))));
-
   String _ai() {
     final now = DateTime.now(); final dim = DateUtils.getDaysInMonth(now.year, now.month);
     final dp = now.day; final dl = dim - dp;
     final da = dp > 0 && tExp > 0 ? tExp / dp : 0.0; final proj = da * dim;
-    if (tExp == 0) return 'No expenses recorded yet. Add transactions to see spending insights.';
-    final ec = txns.where((t) => t.type == 'expense').length;
+    if (tExp == 0) return 'No expenses this month yet. Add transactions to see spending insights.';
+    final ec = txns.where((t) => t.type == 'expense' && t.date.year == now.year && t.date.month == now.month).length;
     final mExp = txns.where((t) => t.type == 'expense' && t.date.month == now.month && t.date.year == now.year).toList();
     final p = <String>[];
-    p.add('$ec expenses, avg ${fmtAmt(tExp / ec)} each.');
+    if (ec > 0) p.add('$ec expense${ec == 1 ? '' : 's'} this month, avg ${fmtAmt(tExp / ec)} each.');
     if (monthBud > 0) p.add(proj > monthBud ? '⚠️ Projected ${fmtAmt(proj)} exceeds ${fmtInt(monthBud)} budget.' : '✅ On track: ${fmtAmt(proj)} projected of ${fmtInt(monthBud)}.');
     if (tInc > 0) p.add('Savings: ${((tInc - tExp) / tInc * 100).round()}%.');
     if (dl > 0 && monthBud > 0 && monthBud > tExp) p.add('${fmtAmt((monthBud - tExp) / dl)}/day for remaining $dl days.');
@@ -693,28 +709,30 @@ class _AddSheet extends StatefulWidget {
   @override State<_AddSheet> createState() => _AddSheetState();
 }
 class _AddSheetState extends State<_AddSheet> {
-  bool _exp = true; String _amt = '', _merch = '', _cat = '', _note = ''; bool _suggested = false;
-DateTime _date = DateTime.now();
-bool _use24h = false;
+  bool _exp = true; String _amt = '', _merch = '', _cat = '', _note = '';
+  DateTime _date = DateTime.now();
+  bool _use24h = false;
+  bool _suggested = false;
 
-@override
-void initState() {
-  super.initState();
-  SharedPreferences.getInstance().then((p) {
-    if (mounted) {
-      setState(() => _use24h = p.getBool('time_format_24h') ?? false);
-    }
-  });
-}
+  @override
+  void initState() {
+    super.initState();
+    SharedPreferences.getInstance().then((p) {
+      if (mounted) {
+        setState(() => _use24h = p.getBool('time_format_24h') ?? false);
+      }
+    });
+  }
+
   @override Widget build(BuildContext context) { final cs = Theme.of(context).colorScheme; final cl = _exp ? cats : iCats; final ok = _amt.isNotEmpty && _merch.isNotEmpty && _cat.isNotEmpty;
     return Container(constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.88), decoration: BoxDecoration(color: cs.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
       child: ListView(padding: const EdgeInsets.fromLTRB(18, 12, 18, 34), children: [
         Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: cs.outline.withOpacity(0.3), borderRadius: BorderRadius.circular(2)))), const SizedBox(height: 16),
         Text('Add Transaction', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: cs.onSurface)), const SizedBox(height: 14),
         Row(children: [
-          Expanded(child: GestureDetector(onTap: () => setState(() { _exp = true; _cat = ''; }), child: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), color: _exp ? const Color(0xFFF43F5E).withOpacity(0.1) : Colors.transparent, border: Border.all(color: _exp ? const Color(0xFFF43F5E).withOpacity(0.3) : cs.outline.withOpacity(0.1))), child: Center(child: Text('💸 Expense', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: _exp ? const Color(0xFFF43F5E) : cs.onSurface.withOpacity(0.4))))))),
+          Expanded(child: GestureDetector(onTap: () => setState(() { _exp = true; _cat = ''; _suggested = false; }), child: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), color: _exp ? const Color(0xFFF43F5E).withOpacity(0.1) : Colors.transparent, border: Border.all(color: _exp ? const Color(0xFFF43F5E).withOpacity(0.3) : cs.outline.withOpacity(0.1))), child: Center(child: Text('💸 Expense', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: _exp ? const Color(0xFFF43F5E) : cs.onSurface.withOpacity(0.4))))))),
           const SizedBox(width: 8),
-          Expanded(child: GestureDetector(onTap: () => setState(() { _exp = false; _cat = ''; }), child: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), color: !_exp ? const Color(0xFF22C55E).withOpacity(0.1) : Colors.transparent, border: Border.all(color: !_exp ? const Color(0xFF22C55E).withOpacity(0.3) : cs.outline.withOpacity(0.1))), child: Center(child: Text('💰 Income', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: !_exp ? const Color(0xFF22C55E) : cs.onSurface.withOpacity(0.4))))))),
+          Expanded(child: GestureDetector(onTap: () => setState(() { _exp = false; _cat = ''; _suggested = false; }), child: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), color: !_exp ? const Color(0xFF22C55E).withOpacity(0.1) : Colors.transparent, border: Border.all(color: !_exp ? const Color(0xFF22C55E).withOpacity(0.3) : cs.outline.withOpacity(0.1))), child: Center(child: Text('💰 Income', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: !_exp ? const Color(0xFF22C55E) : cs.onSurface.withOpacity(0.4))))))),
         ]), const SizedBox(height: 14),
         TextField(keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (v) => setState(() => _amt = v), style: GoogleFonts.jetBrainsMono(fontSize: 28, fontWeight: FontWeight.w800),
           decoration: InputDecoration(hintText: '₹ 0', filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
@@ -731,7 +749,7 @@ void initState() {
         const SizedBox(height: 14),
         GridView.builder(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, mainAxisSpacing: 7, crossAxisSpacing: 7, childAspectRatio: 1.15), itemCount: cl.length,
           itemBuilder: (_, i) { final c = cl[i]; final sel = _cat == c.id;
-            return GestureDetector(onTap: () => setState(() => _cat = c.id), child: Container(decoration: BoxDecoration(color: sel ? c.color.withOpacity(0.15) : cs.outline.withOpacity(0.04), borderRadius: BorderRadius.circular(10), border: Border.all(color: sel ? c.color.withOpacity(0.4) : cs.outline.withOpacity(0.08))),
+            return GestureDetector(onTap: () => setState(() { _cat = c.id; _suggested = false; }), child: Container(decoration: BoxDecoration(color: sel ? c.color.withOpacity(0.15) : cs.outline.withOpacity(0.04), borderRadius: BorderRadius.circular(10), border: Border.all(color: sel ? c.color.withOpacity(0.4) : cs.outline.withOpacity(0.08))),
               child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text(c.icon, style: const TextStyle(fontSize: 20)), const SizedBox(height: 3), Text(c.name, style: TextStyle(fontSize: 9, color: sel ? c.color : cs.onSurface.withOpacity(0.5), fontWeight: sel ? FontWeight.w700 : FontWeight.w400), textAlign: TextAlign.center, maxLines: 2)]))); }),
         const SizedBox(height: 18),
         ElevatedButton(onPressed: ok ? () {
@@ -759,23 +777,30 @@ void initState() {
 }
 
 class _EditSheet extends StatefulWidget {
-  final Txn txn; final Color accent; final ValueChanged<Txn> onSave; final VoidCallback onDelete, onStopAuto;
-  const _EditSheet({required this.txn, required this.accent, required this.onSave, required this.onDelete, required this.onStopAuto});
+  final Txn txn; final Color accent; final ValueChanged<Txn> onSave; final VoidCallback onDelete, onStopAuto, onStartAuto;
+  const _EditSheet({required this.txn, required this.accent, required this.onSave, required this.onDelete, required this.onStopAuto, required this.onStartAuto});
   @override State<_EditSheet> createState() => _EditSheetState();
 }
 class _EditSheetState extends State<_EditSheet> {
-  late String _cat, _note; late TextEditingController _nc; late DateTime _date; bool _use24h = false;
-  @override void initState() { super.initState(); _cat = widget.txn.category; _note = widget.txn.note; _nc = TextEditingController(text: _note); _date = widget.txn.date; SharedPreferences.getInstance().then((p) { if (mounted) setState(() => _use24h = p.getBool('time_format_24h') ?? false); }); }
+  late String _cat, _note, _amt; late TextEditingController _nc, _ac; late DateTime _date; bool _use24h = false; bool _learning = true;
+  @override void initState() { super.initState(); _cat = widget.txn.category; _note = widget.txn.note; _nc = TextEditingController(text: _note); _date = widget.txn.date;
+    _amt = widget.txn.amount == widget.txn.amount.truncateToDouble() ? widget.txn.amount.toInt().toString() : widget.txn.amount.toString();
+    _ac = TextEditingController(text: _amt);
+    SharedPreferences.getInstance().then((p) { if (mounted) setState(() => _use24h = p.getBool('time_format_24h') ?? false); });
+    Db.isAutoEnabled(widget.txn.merchant).then((on) { if (mounted) setState(() => _learning = on); }); }
+  @override void dispose() { _nc.dispose(); _ac.dispose(); super.dispose(); }
   @override Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme; final isI = widget.txn.type == 'income'; final cl = isI ? iCats : cats;
     return Container(constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.78), decoration: BoxDecoration(color: cs.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
       child: ListView(padding: const EdgeInsets.fromLTRB(18, 12, 18, 34), children: [
         Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: cs.outline.withOpacity(0.3), borderRadius: BorderRadius.circular(2)))), const SizedBox(height: 16),
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('Edit', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: cs.onSurface)),
-          Row(children: [TextButton(onPressed: () { HapticFeedback.lightImpact(); widget.onStopAuto(); }, child: Text('Stop learning', style: TextStyle(color: cs.onSurface.withOpacity(0.4), fontSize: 12))),
+          Row(children: [TextButton(onPressed: () { _learning ? HapticFeedback.lightImpact() : HapticFeedback.mediumImpact(); _learning ? widget.onStopAuto() : widget.onStartAuto(); }, child: Text(_learning ? 'Stop learning' : 'Start learning again', style: TextStyle(color: _learning ? cs.onSurface.withOpacity(0.4) : const Color(0xFF22C55E), fontWeight: _learning ? FontWeight.w500 : FontWeight.w700, fontSize: 12))),
             TextButton(onPressed: () { HapticFeedback.mediumImpact(); widget.onDelete(); }, child: const Text('Delete', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.w700, fontSize: 12)))])]),
         const SizedBox(height: 8),
-        Text(isI ? '+${fmtAmt(widget.txn.amount)}' : '-${fmtAmt(widget.txn.amount)}', style: GoogleFonts.jetBrainsMono(fontSize: 26, fontWeight: FontWeight.w800, color: isI ? const Color(0xFF22C55E) : cs.onSurface)),
+        TextField(controller: _ac, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (v) => setState(() => _amt = v), style: GoogleFonts.jetBrainsMono(fontSize: 26, fontWeight: FontWeight.w800, color: isI ? const Color(0xFF22C55E) : cs.onSurface),
+          decoration: InputDecoration(prefixText: isI ? '+ ₹ ' : '- ₹ ', prefixStyle: GoogleFonts.jetBrainsMono(fontSize: 26, fontWeight: FontWeight.w800, color: isI ? const Color(0xFF22C55E) : cs.onSurface), filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none), contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12))),
+        const SizedBox(height: 6),
         Text(widget.txn.merchant, style: TextStyle(fontSize: 12, color: cs.onSurface.withOpacity(0.5))),
         const SizedBox(height: 12),
         Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: cs.outline.withOpacity(0.05), border: Border.all(color: cs.outline.withOpacity(0.08))), child: Row(children: [
@@ -791,7 +816,7 @@ class _EditSheetState extends State<_EditSheet> {
             return GestureDetector(onTap: () => setState(() => _cat = c.id), child: Container(decoration: BoxDecoration(color: sel ? c.color.withOpacity(0.15) : cs.outline.withOpacity(0.04), borderRadius: BorderRadius.circular(10), border: Border.all(color: sel ? c.color.withOpacity(0.4) : cs.outline.withOpacity(0.08))),
               child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text(c.icon, style: const TextStyle(fontSize: 20)), const SizedBox(height: 3), Text(c.name, style: TextStyle(fontSize: 9, color: sel ? c.color : cs.onSurface.withOpacity(0.5), fontWeight: sel ? FontWeight.w700 : FontWeight.w400), textAlign: TextAlign.center, maxLines: 2)]))); }),
         const SizedBox(height: 16),
-        ElevatedButton(onPressed: () => widget.onSave(Txn(id: widget.txn.id, amount: widget.txn.amount, merchant: widget.txn.merchant, category: _cat, account: widget.txn.account, type: widget.txn.type, date: _date, note: _note)),
+        ElevatedButton(onPressed: () { final amount = double.tryParse(_amt.replaceAll(',', '').replaceAll(' ', '')) ?? widget.txn.amount; if (amount <= 0) return; widget.onSave(Txn(id: widget.txn.id, amount: amount, merchant: widget.txn.merchant, category: _cat, account: widget.txn.account, type: widget.txn.type, date: _date, note: _note)); },
           style: ElevatedButton.styleFrom(backgroundColor: widget.accent, foregroundColor: Colors.white, padding: const EdgeInsets.all(16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
           child: const Text('Save Changes', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)))]));
   }
