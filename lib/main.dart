@@ -423,10 +423,17 @@ class _ActivityState extends State<_Activity> {
 
 // ═══ BUDGETS ═══
 
-class _BudgetsTab extends StatelessWidget {
+class _BudgetsTab extends StatefulWidget {
   final List<Txn> txns; final Map<String, int> catB; final int monthBud; final Color accent; final VoidCallback onEditTotal; final ValueChanged<String> onEditCat;
   const _BudgetsTab({required this.txns, required this.catB, required this.monthBud, required this.accent, required this.onEditTotal, required this.onEditCat});
-  @override Widget build(BuildContext context) { final cs = Theme.of(context).colorScheme; final n = DateTime.now();
+  @override State<_BudgetsTab> createState() => _BudgetsTabState();
+}
+class _BudgetsTabState extends State<_BudgetsTab> {
+  bool _showAll = false;
+  @override Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme; final n = DateTime.now();
+    final txns = widget.txns; final catB = widget.catB; final monthBud = widget.monthBud;
+    final accent = widget.accent;
     final dim = DateUtils.getDaysInMonth(n.year, n.month);
     final dp = n.day; final dl = dim - dp;
     final tExp = txns.where((t) => t.type == 'expense' && t.date.year == n.year && t.date.month == n.month).fold(0.0, (s, t) => s + t.amount);
@@ -479,22 +486,51 @@ class _BudgetsTab extends StatelessWidget {
           ]),
         ]),
       ),
-      GestureDetector(onTap: onEditTotal, child: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(18),
+      GestureDetector(onTap: widget.onEditTotal, child: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), gradient: LinearGradient(colors: [accent.withOpacity(0.1), Colors.purple.withOpacity(0.05)])),
         child: Row(children: [const Text('💰', style: TextStyle(fontSize: 24)), const SizedBox(width: 12),
           Expanded(child: Text('Monthly Budget', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface))),
           Text(monthBud > 0 ? fmtInt(monthBud) : 'Not set', style: GoogleFonts.jetBrainsMono(fontSize: 16, fontWeight: FontWeight.w700, color: monthBud > 0 ? accent : cs.onSurface.withOpacity(0.3))),
           const SizedBox(width: 6), Icon(Icons.edit_rounded, size: 16, color: cs.onSurface.withOpacity(0.3))]))),
       const SizedBox(height: 8),
-      Padding(padding: const EdgeInsets.fromLTRB(18, 4, 18, 8), child: Text('Category budgets (optional — tap to set)', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.35)))),
-      ...cats.map((cat) { final bud = catB[cat.id] ?? 0; final spent = txns.where((t) => t.type == 'expense' && t.category == cat.id && t.date.year == n.year && t.date.month == n.month).fold(0.0, (s, t) => s + t.amount); final pct = bud > 0 ? (spent / bud).clamp(0.0, 1.0) : 0.0;
-        return GestureDetector(onTap: () => onEditCat(cat.id), child: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 3), padding: const EdgeInsets.all(14),
+      // ── Section header + show-all toggle ──────────────────────────────────
+      Padding(padding: const EdgeInsets.fromLTRB(18, 4, 16, 8), child: Row(children: [
+        Expanded(child: Text('Category budgets (optional — tap to set)', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.35)))),
+        GestureDetector(
+          onTap: () { HapticFeedback.lightImpact(); setState(() => _showAll = !_showAll); },
+          child: Text(_showAll ? 'Show less' : 'Show all', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: accent))),
+      ])),
+      // ── Category rows ──────────────────────────────────────────────────────
+      ...cats.map((cat) {
+        final bud = catB[cat.id] ?? 0;
+        final spent = txns.where((t) => t.type == 'expense' && t.category == cat.id && t.date.year == n.year && t.date.month == n.month).fold(0.0, (s, t) => s + t.amount);
+        // Filter: hide categories with no budget AND no spending this month,
+        // unless the user tapped "Show all".
+        if (!_showAll && bud == 0 && spent == 0) return const SizedBox.shrink();
+        final pct = bud > 0 ? (spent / bud).clamp(0.0, 1.0) : 0.0;
+        // Urgency tier
+        final isOver    = bud > 0 && spent > bud;
+        final isWarning = bud > 0 && !isOver && pct >= 0.8;
+        final urgColor  = isOver ? const Color(0xFFF43F5E) : isWarning ? const Color(0xFFF59E0B) : const Color(0xFF22C55E);
+        final rightLabel = bud > 0
+            ? (isOver ? 'Over!' : '${fmtAmt(bud - spent)} left')
+            : null;
+        final rightColor = isOver ? const Color(0xFFF43F5E) : isWarning ? const Color(0xFFF59E0B) : const Color(0xFF22C55E);
+        return GestureDetector(onTap: () => widget.onEditCat(cat.id), child: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 3), padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
           child: Column(children: [Row(children: [Text(cat.icon, style: const TextStyle(fontSize: 20)), const SizedBox(width: 10),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(cat.name, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
               Text(bud > 0 ? '${fmtAmt(spent)} / ${fmtInt(bud)}' : spent > 0 ? fmtAmt(spent) : 'No budget set', style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.4)))])),
-            bud > 0 ? Text(spent > bud ? 'Over!' : '${fmtAmt(bud - spent)} left', style: GoogleFonts.jetBrainsMono(fontSize: 11, fontWeight: FontWeight.w700, color: spent > bud ? const Color(0xFFF43F5E) : const Color(0xFF22C55E))) : Icon(Icons.add_rounded, size: 18, color: cs.onSurface.withOpacity(0.2))]),
-            if (bud > 0) ...[const SizedBox(height: 8), ClipRRect(borderRadius: BorderRadius.circular(3), child: LinearProgressIndicator(value: pct, minHeight: 5, backgroundColor: cs.outline.withOpacity(0.1), valueColor: AlwaysStoppedAnimation(pct > 0.9 ? const Color(0xFFF43F5E) : cat.color)))]]))); })]));
+            rightLabel != null
+                ? Text(rightLabel, style: GoogleFonts.jetBrainsMono(fontSize: 11, fontWeight: FontWeight.w700, color: rightColor))
+                : Icon(Icons.add_rounded, size: 18, color: cs.onSurface.withOpacity(0.2))]),
+          if (bud > 0) ...[const SizedBox(height: 8),
+            ClipRRect(borderRadius: BorderRadius.circular(3), child: LinearProgressIndicator(value: pct, minHeight: 5, backgroundColor: cs.outline.withOpacity(0.1), valueColor: AlwaysStoppedAnimation(urgColor)))],
+          // Spending-only row (no budget set) — show a dim bar as context
+          if (bud == 0 && spent > 0) ...[const SizedBox(height: 6),
+            Text('${fmtAmt(spent)} spent this month — tap to set a budget', style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.35)))],
+        ])));
+      }).toList()]));
   }
 }
 
