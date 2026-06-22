@@ -752,6 +752,70 @@ class _StatsTab extends StatelessWidget {
           ]),
         );
       }),
+      // ── P2.6.3 Unusual spend (this month's outlier expenses) ───────────────
+      Builder(builder: (_) {
+        // This month's expenses, largest first.
+        final monthExp = txns.where((t) =>
+            t.type == 'expense' &&
+            t.date.year == now.year &&
+            t.date.month == now.month).toList()
+          ..sort((a, b) => b.amount.compareTo(a.amount));
+        // Need a stable baseline before anything counts as "unusual".
+        if (monthExp.length < 4) return const SizedBox.shrink();
+        // Median is robust to outliers (mean would be dragged up by the very
+        // spikes we're hunting, masking them).
+        final sorted = monthExp.map((t) => t.amount).toList()..sort();
+        final n = sorted.length;
+        final median = n.isOdd
+            ? sorted[n ~/ 2]
+            : (sorted[n ~/ 2 - 1] + sorted[n ~/ 2]) / 2;
+        if (median <= 0) return const SizedBox.shrink();
+        // Flag: ≥ 2.5× the typical spend AND ≥ ₹500 (ignore tiny expenses).
+        // Recurring merchants (P2.4 detection) are expected, not unusual — a
+        // ₹1800 monthly Gym charge is large but contextually normal, so we
+        // exclude any merchant in the `recurring` set regardless of magnitude.
+        final anomalies = monthExp
+            .where((t) =>
+                t.amount >= median * 2.5 &&
+                t.amount >= 500 &&
+                !recurring.contains(Db.merchantKey(t.merchant)))
+            .take(5)
+            .toList();
+        if (anomalies.isEmpty) return const SizedBox.shrink();
+        const warn = Color(0xFFF59E0B);
+        return Container(
+          margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: warn.withOpacity(0.06),
+            border: Border.all(color: warn.withOpacity(0.18)),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.warning_amber_rounded, size: 16, color: warn),
+              const SizedBox(width: 8),
+              Text('Unusual spend', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
+            ]),
+            const SizedBox(height: 10),
+            ...anomalies.map((t) {
+              final cat = fCat(t.category);
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: Row(children: [
+                  if (cat != null) Text(cat.icon, style: const TextStyle(fontSize: 15)),
+                  const SizedBox(width: 8),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(t.merchant.trim().isEmpty ? (cat?.name ?? 'Expense') : t.merchant, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis),
+                    Text(DateFormat('d MMM').format(t.date), style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.4))),
+                  ])),
+                  Text(fmtAmt(t.amount), style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: warn)),
+                ]),
+              );
+            }),
+          ]),
+        );
+      }),
       if (txns.isNotEmpty) Container(margin: const EdgeInsets.fromLTRB(16, 14, 16, 0), padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: accent.withOpacity(0.06)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [const Text('🧠', style: TextStyle(fontSize: 16)), const SizedBox(width: 8), Text('AI Overview', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: accent))]), const SizedBox(height: 8),
