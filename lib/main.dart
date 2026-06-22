@@ -579,7 +579,10 @@ class _StatsTab extends StatelessWidget {
     final byM = <String, List<Txn>>{};
     for (var t in txns.where((t) => t.type == 'expense')) { final k = Db.merchantKey(t.merchant); if (k.isEmpty) continue; (byM[k] ??= []).add(t); }
     final recurring = <String>{};
-    byM.forEach((m, list) { if (list.length < 3) return; final s = [...list]..sort((a, b) => a.date.compareTo(b.date)); final amts = s.map((t) => t.amount).toList(); final avg = amts.reduce((a, b) => a + b) / amts.length; if (avg <= 0) return; if (!amts.every((a) => (a - avg).abs() / avg <= 0.2)) return; final gaps = <int>[]; for (var i = 1; i < s.length; i++) gaps.add(s[i].date.difference(s[i-1].date).inDays); final ag = gaps.reduce((a, b) => a + b) / gaps.length; if (!gaps.every((g) => (g - ag).abs() <= 4)) return; if ((ag >= 25 && ag <= 35) || (ag >= 6 && ag <= 8)) recurring.add(m); });
+    // P2.7.1 — reuse the same detection to capture cadence + est. monthly cost.
+    // recurring-set membership is identical to before; we only record metadata.
+    final recurMeta = <String, ({double monthly, bool weekly, String disp})>{};
+    byM.forEach((m, list) { if (list.length < 3) return; final s = [...list]..sort((a, b) => a.date.compareTo(b.date)); final amts = s.map((t) => t.amount).toList(); final avg = amts.reduce((a, b) => a + b) / amts.length; if (avg <= 0) return; if (!amts.every((a) => (a - avg).abs() / avg <= 0.2)) return; final gaps = <int>[]; for (var i = 1; i < s.length; i++) gaps.add(s[i].date.difference(s[i-1].date).inDays); final ag = gaps.reduce((a, b) => a + b) / gaps.length; if (!gaps.every((g) => (g - ag).abs() <= 4)) return; final weekly = ag >= 6 && ag <= 8; final monthly = ag >= 25 && ag <= 35; if (weekly || monthly) { recurring.add(m); recurMeta[m] = (monthly: avg * (30.44 / ag), weekly: weekly, disp: Db.merchantDisplay(s.last.merchant)); } });
 
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
       Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 14), child: Text('Analytics', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
@@ -813,6 +816,37 @@ class _StatsTab extends StatelessWidget {
                 ]),
               );
             }),
+          ]),
+        );
+      }),
+      // ── P2.7.1 Subscriptions (recurring obligations from P2.4 detection) ───
+      if (recurMeta.isNotEmpty) Builder(builder: (_) {
+        final subs = recurMeta.entries.toList()..sort((a, b) => b.value.monthly.compareTo(a.value.monthly));
+        final est = subs.fold(0.0, (s, e) => s + e.value.monthly);
+        return Container(
+          margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              Row(children: [
+                Icon(Icons.autorenew_rounded, size: 16, color: accent),
+                const SizedBox(width: 8),
+                Text('Subscriptions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
+              ]),
+              Text('~${fmtAmt(est)}/mo', style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: accent)),
+            ]),
+            const SizedBox(height: 4),
+            Text('${subs.length} recurring ${subs.length == 1 ? 'payment' : 'payments'} detected', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))),
+            const SizedBox(height: 10),
+            ...subs.map((e) => Padding(padding: const EdgeInsets.symmetric(vertical: 5), child: Row(children: [
+              Expanded(child: Row(children: [
+                Flexible(child: Text(e.value.disp, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis)),
+                const SizedBox(width: 8),
+                Container(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2), decoration: BoxDecoration(borderRadius: BorderRadius.circular(6), color: accent.withOpacity(0.12)), child: Text(e.value.weekly ? 'Weekly' : 'Monthly', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: accent))),
+              ])),
+              Text('~${fmtAmt(e.value.monthly)}', style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface)),
+            ]))),
           ]),
         );
       }),
