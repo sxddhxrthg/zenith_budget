@@ -427,8 +427,58 @@ class _BudgetsTab extends StatelessWidget {
   final List<Txn> txns; final Map<String, int> catB; final int monthBud; final Color accent; final VoidCallback onEditTotal; final ValueChanged<String> onEditCat;
   const _BudgetsTab({required this.txns, required this.catB, required this.monthBud, required this.accent, required this.onEditTotal, required this.onEditCat});
   @override Widget build(BuildContext context) { final cs = Theme.of(context).colorScheme; final n = DateTime.now();
+    final dim = DateUtils.getDaysInMonth(n.year, n.month);
+    final dp = n.day; final dl = dim - dp;
+    final tExp = txns.where((t) => t.type == 'expense' && t.date.year == n.year && t.date.month == n.month).fold(0.0, (s, t) => s + t.amount);
+    final pctUsed = monthBud > 0 ? (tExp / monthBud).clamp(0.0, 1.0) : 0.0;
+    final da = dp > 0 && tExp > 0 ? tExp / dp : 0.0;
+    final proj = da * dim;
+    // Pace: compare % budget used vs % of month elapsed
+    final pctMonth = dp / dim;
+    final isOver = tExp > monthBud && monthBud > 0;
+    final isAtRisk = !isOver && monthBud > 0 && pctUsed > pctMonth + 0.1;
+    final paceColor = isOver ? const Color(0xFFF43F5E) : isAtRisk ? const Color(0xFFF59E0B) : const Color(0xFF22C55E);
+    final paceLabel = isOver ? 'Over Budget' : isAtRisk ? 'At Risk' : 'On Track';
+    final paceIcon = isOver ? '🔴' : isAtRisk ? '🟡' : '🟢';
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
       Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 14), child: Text('Budgets', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
+      // ── Budget status card (only when budget is set) ──────────────────────
+      if (monthBud > 0) Container(
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), color: cs.surface),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Text(paceIcon, style: const TextStyle(fontSize: 14)),
+            const SizedBox(width: 8),
+            Text(paceLabel, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: paceColor)),
+            const Spacer(),
+            Text('Day $dp of $dim', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))),
+          ]),
+          const SizedBox(height: 10),
+          ClipRRect(borderRadius: BorderRadius.circular(4), child: LinearProgressIndicator(
+            value: pctUsed,
+            minHeight: 6,
+            backgroundColor: cs.outline.withOpacity(0.1),
+            valueColor: AlwaysStoppedAnimation(paceColor),
+          )),
+          const SizedBox(height: 8),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text('${fmtAmt(tExp)} spent', style: GoogleFonts.jetBrainsMono(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface)),
+            Text('${fmtInt(monthBud)} budget', style: GoogleFonts.jetBrainsMono(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.4))),
+          ]),
+          const SizedBox(height: 6),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            if (!isOver && dl > 0)
+              Text('${fmtAmt((monthBud - tExp) / dl)}/day remaining', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.5)))
+            else if (isOver)
+              Text('${fmtAmt(tExp - monthBud)} over budget', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFFF43F5E)))
+            else
+              const SizedBox.shrink(),
+            if (da > 0) Text('Projected: ${fmtAmt(proj)}', style: TextStyle(fontSize: 11, color: proj > monthBud ? const Color(0xFFF43F5E) : cs.onSurface.withOpacity(0.4))),
+          ]),
+        ]),
+      ),
       GestureDetector(onTap: onEditTotal, child: Container(margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), gradient: LinearGradient(colors: [accent.withOpacity(0.1), Colors.purple.withOpacity(0.05)])),
         child: Row(children: [const Text('💰', style: TextStyle(fontSize: 24)), const SizedBox(width: 12),
