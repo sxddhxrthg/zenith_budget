@@ -85,6 +85,11 @@ class _ShellState extends State<Shell> {
   // once the user approves it (or adds one manually).
   List<Map<String, dynamic>> _subs = [];
   final Set<String> _dismissedSubs = {};
+  // P2.7.5 — entry-time subscription suggestion bookkeeping.
+  // _declinedSubs: keys the user pressed "Not now" on (persisted, never re-asked).
+  // _offeredSubs: keys already offered this session (passive ignore won't re-nag).
+  Set<String> _declinedSubs = {};
+  final Set<String> _offeredSubs = {};
   StreamSubscription? _sub;
   bool _notifOk = false, _loading = true, _asked = false;
 
@@ -119,7 +124,8 @@ class _ShellState extends State<Shell> {
       subsChanged = true;
     }
     if (subsChanged) await pr.setString('subscriptions', jsonEncode(subs));
-    if (mounted) setState(() { _txns = parsed; _catB = cb; _monthBud = mb; _subs = subs; _loading = false; });
+    final declined = (pr.getStringList('declined_sub_merchants') ?? const []).toSet();
+    if (mounted) setState(() { _txns = parsed; _catB = cb; _monthBud = mb; _subs = subs; _declinedSubs = declined; _loading = false; });
   }
 
   Future<void> _persistSubs() async {
@@ -214,6 +220,81 @@ class _ShellState extends State<Shell> {
   // Session-only dismiss — no persistence, recurrence detection unaffected.
   void _dismissSub(String key) { HapticFeedback.lightImpact(); setState(() => _dismissedSubs.add(key)); }
 
+  // P2.7.5 — persist a "Not now" so this merchant is never suggested again at entry time.
+  Future<void> _declineSub(String key) async {
+    HapticFeedback.lightImpact();
+    _declinedSubs = {..._declinedSubs, key};
+    final pr = await SharedPreferences.getInstance();
+    await pr.setStringList('declined_sub_merchants', _declinedSubs.toList());
+  }
+
+  // P2.7.5.1 — heuristic confidence for entry-time suggestions (no DB, history-based):
+  //   low  (food delivery / rides / marketplaces / eateries) → never ask here; P2.7.2 handles it.
+  //   high (clear subscription brands)                        → ask on the first charge.
+  //   medium (anything else)                                  → ask only once a second charge
+  //                                                              of a near-equal amount is seen.
+  // Deliberately conservative: missing a few subscriptions beats nagging the user.
+  bool _entryConfident(Txn t, String key) {
+    const low = ['swiggy', 'zomato', 'uber', 'ola', 'rapido', 'amazon', 'flipkart', 'pizza', 'domino', 'kfc', 'mcdonald', 'burger', 'blinkit', 'zepto', 'instamart', 'bigbasket', 'dunzo', 'myntra', 'meesho', 'ajio', 'starbucks', 'cafe', 'restaurant', 'petrol', 'fuel'];
+    const high = ['netflix', 'spotify', 'google one', 'youtube premium', 'youtube music', 'apple music', 'apple tv', 'icloud', 'chatgpt', 'openai', 'hotstar', 'audible', 'gym'];
+    if (low.any((k) => key.contains(k))) return false;
+    if (high.any((k) => key.contains(k))) return true;
+    final tol = (t.amount * 0.15).clamp(1.0, double.infinity);
+    return _txns.any((x) => x.type == 'expense' && x.id != t.id && Db.merchantKey(x.merchant) == key && (x.amount - t.amount).abs() <= tol);
+  }
+
+  // P2.7.5 — entry-time subscription suggestion. Fires after an expense is logged;
+  // non-blocking (the txn is already saved), one at a time, never auto-decides cadence.
+  Future<void> _maybeSuggestSub(Txn t) async {
+    if (t.type != 'expense') return;
+    final key = Db.merchantKey(t.merchant);
+    if (key.isEmpty) return;
+    if (_subs.any((s) => s['key'] == key)) return;   // already a subscription
+    if (_declinedSubs.contains(key)) return;          // user said Not now before
+    if (_offeredSubs.contains(key)) return;           // already offered this session
+    // P2.7.5.1 — confidence gate: don't interrupt for ordinary spending. A skip here
+    // does NOT mark the merchant offered, so it can still ask once confidence rises.
+    if (!_entryConfident(t, key)) return;
+    _offeredSubs.add(key);
+    // Let the Add sheet finish its exit animation before presenting this one.
+    await Future.delayed(const Duration(milliseconds: 350));
+    if (!mounted) return;
+    String? cadence; // never preselected — automation assists, it does not decide.
+    final result = await showModalBottomSheet<String>(context: context, isScrollControlled: true, backgroundColor: Colors.transparent, builder: (ctx) {
+      final cs = Theme.of(ctx).colorScheme;
+      return StatefulBuilder(builder: (ctx, setSt) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+          decoration: BoxDecoration(color: cs.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(22))),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Center(child: Container(width: 38, height: 4, decoration: BoxDecoration(borderRadius: BorderRadius.circular(2), color: cs.onSurface.withOpacity(0.15)))),
+            const SizedBox(height: 16),
+            Row(children: [Icon(Icons.autorenew_rounded, size: 16, color: widget.accent), const SizedBox(width: 8), Text('Recurring expense detected', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: widget.accent))]),
+            const SizedBox(height: 10),
+            Text('${Db.merchantDisplay(t.merchant)}  ${fmtAmt(t.amount)}', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: cs.onSurface)),
+            const SizedBox(height: 2),
+            Text('Add this to subscriptions?', style: TextStyle(fontSize: 12, color: cs.onSurface.withOpacity(0.5))),
+            const SizedBox(height: 14),
+            Row(children: ['weekly', 'monthly'].map((c) { final sel = cadence == c; return Expanded(child: Padding(padding: const EdgeInsets.only(right: 8), child: GestureDetector(onTap: () { HapticFeedback.selectionClick(); setSt(() => cadence = c); }, child: Container(padding: const EdgeInsets.symmetric(vertical: 11), alignment: Alignment.center, decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), color: sel ? widget.accent.withOpacity(0.15) : cs.onSurface.withOpacity(0.04), border: Border.all(color: sel ? widget.accent : Colors.transparent)), child: Text('${c[0].toUpperCase()}${c.substring(1)}', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: sel ? widget.accent : cs.onSurface.withOpacity(0.6))))))); }).toList()),
+            const SizedBox(height: 18),
+            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+              OutlinedButton(onPressed: () => Navigator.pop(ctx, 'decline'), style: OutlinedButton.styleFrom(foregroundColor: cs.onSurface.withOpacity(0.7), side: BorderSide(color: cs.onSurface.withOpacity(0.22)), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))), child: const Text('Not now', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
+              const SizedBox(width: 8),
+              ElevatedButton(onPressed: cadence == null ? null : () => Navigator.pop(ctx, cadence), style: ElevatedButton.styleFrom(backgroundColor: widget.accent, foregroundColor: Colors.white, elevation: 0, padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)), disabledBackgroundColor: widget.accent.withOpacity(0.3)), child: const Text('Add', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700))),
+            ]),
+          ]),
+        ),
+      ));
+    });
+    if (result == 'decline') {
+      await _declineSub(key);
+    } else if (result == 'weekly' || result == 'monthly') {
+      await _upsertSub({'key': key, 'name': Db.merchantDisplay(t.merchant), 'amount': t.amount, 'cadence': result, 'day': result == 'weekly' ? t.date.weekday : t.date.day, 'time': '${t.date.hour.toString().padLeft(2, '0')}:${t.date.minute.toString().padLeft(2, '0')}', 'source': 'auto'});
+    }
+    // null (tapped outside / back) = passive ignore: stays in _offeredSubs for this session only.
+  }
+
   void _listen() {
     _sub = NB.stream.listen((data) async {
       final amt = (data['amount'] as num?)?.toDouble() ?? 0;
@@ -259,7 +340,8 @@ class _ShellState extends State<Shell> {
     builder: (ctx) => _AddSheet(accent: widget.accent, onAdd: (t) async {
       await Db.insTxn(t.toMap());
       if (t.type == 'expense' && t.merchant.trim().isNotEmpty && t.category.isNotEmpty) await Db.learnMerchant(t.merchant, t.category);
-      await _load(); if (ctx.mounted) Navigator.pop(ctx); }));
+      await _load(); if (ctx.mounted) Navigator.pop(ctx);
+      _maybeSuggestSub(t); }));
 
   void _showEdit(Txn t) => showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
     builder: (ctx) => _EditSheet(txn: t, accent: widget.accent,
@@ -344,7 +426,7 @@ class _ShellState extends State<Shell> {
       _Home(txns: _txns, catB: _catB, monthBud: _monthBud, accent: widget.accent, name: widget.name, tExp: tExp, tInc: tInc, notifOk: _notifOk, onNotif: () { NB.openNotif(); Future.delayed(const Duration(seconds: 3), _checkNotif); }, onAdd: _showAdd, onTap: _showEdit, onEditBud: _editMonthBud, onDelete: _delTxn),
       _Activity(txns: _txns, onTap: _showEdit, onDelete: _delTxn),
       _BudgetsTab(txns: _txns, catB: _catB, monthBud: _monthBud, accent: widget.accent, onEditTotal: _editMonthBud, onEditCat: _editCatBud),
-      _StatsTab(txns: _txns, accent: widget.accent, tExp: tExp, tInc: tInc, catB: _catB, monthBud: _monthBud, subs: _subs, approvedKeys: _subs.map((s) => s['key'] as String).toSet(), dismissedSubs: _dismissedSubs, onApproveSub: _approveSub, onDismissSub: _dismissSub, onAddManual: () => _subSheet(), onEditSub: (s) => _subSheet(existing: s), onRemoveSub: _removeSub),
+      _StatsTab(txns: _txns, accent: widget.accent, tExp: tExp, tInc: tInc, catB: _catB, monthBud: _monthBud, subs: _subs, approvedKeys: _subs.map((s) => s['key'] as String).toSet(), dismissedSubs: _dismissedSubs, declinedSubs: _declinedSubs, onApproveSub: _approveSub, onDismissSub: _dismissSub, onAddManual: () => _subSheet(), onEditSub: (s) => _subSheet(existing: s), onRemoveSub: _removeSub),
       _Settings(accent: widget.accent, isDark: widget.isDark, notifOk: _notifOk, scaleIdx: widget.scaleIdx, tTheme: widget.tTheme, sAccent: widget.sAccent, sScale: widget.sScale, onNotif: () { NB.openNotif(); Future.delayed(const Duration(seconds: 3), _checkNotif); }),
     ];
     return Scaffold(body: Stack(children: [
@@ -671,9 +753,9 @@ class _BudgetsTabState extends State<_BudgetsTab> {
 
 class _StatsTab extends StatelessWidget {
   final List<Txn> txns; final Color accent; final double tExp, tInc; final Map<String, int> catB; final int monthBud;
-  final List<Map<String, dynamic>> subs; final Set<String> approvedKeys; final Set<String> dismissedSubs;
+  final List<Map<String, dynamic>> subs; final Set<String> approvedKeys; final Set<String> dismissedSubs; final Set<String> declinedSubs;
   final Future<void> Function(Map<String, dynamic>) onApproveSub; final void Function(String) onDismissSub; final Future<void> Function() onAddManual; final void Function(Map<String, dynamic>) onEditSub; final Future<void> Function(String) onRemoveSub;
-  const _StatsTab({required this.txns, required this.accent, required this.tExp, required this.tInc, required this.catB, required this.monthBud, required this.subs, required this.approvedKeys, required this.dismissedSubs, required this.onApproveSub, required this.onDismissSub, required this.onAddManual, required this.onEditSub, required this.onRemoveSub});
+  const _StatsTab({required this.txns, required this.accent, required this.tExp, required this.tInc, required this.catB, required this.monthBud, required this.subs, required this.approvedKeys, required this.dismissedSubs, required this.declinedSubs, required this.onApproveSub, required this.onDismissSub, required this.onAddManual, required this.onEditSub, required this.onRemoveSub});
   @override Widget build(BuildContext context) { final cs = Theme.of(context).colorScheme;
     final now = DateTime.now(); final dim = DateUtils.getDaysInMonth(now.year, now.month);
     final dp = now.day; final dl = dim - dp;
@@ -946,7 +1028,7 @@ class _StatsTab extends StatelessWidget {
       // ── P2.7.2 Recurring-payment suggestion (first unapproved merchant) ────
       Builder(builder: (_) {
         final pend = recurMeta.entries
-            .where((e) => !approvedKeys.contains(e.key) && !dismissedSubs.contains(e.key))
+            .where((e) => !approvedKeys.contains(e.key) && !dismissedSubs.contains(e.key) && !declinedSubs.contains(e.key))
             .toList()..sort((a, b) => b.value.amount.compareTo(a.value.amount));
         if (pend.isEmpty) return const SizedBox.shrink();
         final e = pend.first;
