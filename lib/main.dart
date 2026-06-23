@@ -90,6 +90,9 @@ class _ShellState extends State<Shell> {
   // _offeredSubs: keys already offered this session (passive ignore won't re-nag).
   Set<String> _declinedSubs = {};
   final Set<String> _offeredSubs = {};
+  // P2.7.7 — manual paid/unpaid overrides, keyed "<subKey>@<cycleStartYYYYMMDD>".
+  // Absent key = use automatic detection. Scoped per cycle, so it self-resets next cycle.
+  Map<String, bool> _paidOverride = {};
   StreamSubscription? _sub;
   bool _notifOk = false, _loading = true, _asked = false;
 
@@ -125,7 +128,10 @@ class _ShellState extends State<Shell> {
     }
     if (subsChanged) await pr.setString('subscriptions', jsonEncode(subs));
     final declined = (pr.getStringList('declined_sub_merchants') ?? const []).toSet();
-    if (mounted) setState(() { _txns = parsed; _catB = cb; _monthBud = mb; _subs = subs; _declinedSubs = declined; _loading = false; });
+    final po = <String, bool>{};
+    final rawPaid = pr.getString('sub_paid_override');
+    if (rawPaid != null && rawPaid.isNotEmpty) { try { (jsonDecode(rawPaid) as Map).forEach((k, v) { if (v is bool) po[k as String] = v; }); } catch (_) {} }
+    if (mounted) setState(() { _txns = parsed; _catB = cb; _monthBud = mb; _subs = subs; _declinedSubs = declined; _paidOverride = po; _loading = false; });
   }
 
   Future<void> _persistSubs() async {
@@ -226,6 +232,20 @@ class _ShellState extends State<Shell> {
     _declinedSubs = {..._declinedSubs, key};
     final pr = await SharedPreferences.getInstance();
     await pr.setStringList('declined_sub_merchants', _declinedSubs.toList());
+  }
+
+  // P2.7.7 — flip the paid state for this sub's CURRENT billing cycle. We only store an
+  // override when it differs from automatic detection (keeps the map tiny + self-healing).
+  Future<void> _toggleSubPaid(Map<String, dynamic> sub) async {
+    HapticFeedback.selectionClick();
+    final now = DateTime.now();
+    final id = paidId(sub, now);
+    final auto = subPaidAuto(sub, _txns, now);
+    final current = _paidOverride.containsKey(id) ? _paidOverride[id]! : auto;
+    final next = !current;
+    setState(() { if (next == auto) { _paidOverride.remove(id); } else { _paidOverride[id] = next; } });
+    final pr = await SharedPreferences.getInstance();
+    await pr.setString('sub_paid_override', jsonEncode(_paidOverride));
   }
 
   // P2.7.5.1 — heuristic confidence for entry-time suggestions (no DB, history-based):
@@ -426,7 +446,7 @@ class _ShellState extends State<Shell> {
       _Home(txns: _txns, catB: _catB, monthBud: _monthBud, accent: widget.accent, name: widget.name, tExp: tExp, tInc: tInc, notifOk: _notifOk, onNotif: () { NB.openNotif(); Future.delayed(const Duration(seconds: 3), _checkNotif); }, onAdd: _showAdd, onTap: _showEdit, onEditBud: _editMonthBud, onDelete: _delTxn),
       _Activity(txns: _txns, onTap: _showEdit, onDelete: _delTxn),
       _BudgetsTab(txns: _txns, catB: _catB, monthBud: _monthBud, accent: widget.accent, onEditTotal: _editMonthBud, onEditCat: _editCatBud),
-      _StatsTab(txns: _txns, accent: widget.accent, tExp: tExp, tInc: tInc, catB: _catB, monthBud: _monthBud, subs: _subs, approvedKeys: _subs.map((s) => s['key'] as String).toSet(), dismissedSubs: _dismissedSubs, declinedSubs: _declinedSubs, onApproveSub: _approveSub, onDismissSub: _dismissSub, onAddManual: () => _subSheet(), onEditSub: (s) => _subSheet(existing: s), onRemoveSub: _removeSub),
+      _StatsTab(txns: _txns, accent: widget.accent, tExp: tExp, tInc: tInc, catB: _catB, monthBud: _monthBud, subs: _subs, approvedKeys: _subs.map((s) => s['key'] as String).toSet(), dismissedSubs: _dismissedSubs, declinedSubs: _declinedSubs, onApproveSub: _approveSub, onDismissSub: _dismissSub, onAddManual: () => _subSheet(), onEditSub: (s) => _subSheet(existing: s), onRemoveSub: _removeSub, paidOverride: _paidOverride, onTogglePaid: _toggleSubPaid),
       _Settings(accent: widget.accent, isDark: widget.isDark, notifOk: _notifOk, scaleIdx: widget.scaleIdx, tTheme: widget.tTheme, sAccent: widget.sAccent, sScale: widget.sScale, onNotif: () { NB.openNotif(); Future.delayed(const Duration(seconds: 3), _checkNotif); }),
     ];
     return Scaffold(body: Stack(children: [
@@ -775,11 +795,46 @@ DateTime nextOccurrence(Map<String, dynamic> sub, DateTime now) {
   return cand;
 }
 
+// P2.7.7 — billing window [start, next) of the cycle that currently contains `now`.
+// next is the upcoming charge; start is the previous occurrence (one cadence earlier,
+// month-length clamped). Used to decide if THIS cycle has been paid.
+({DateTime start, DateTime next}) billingWindow(Map<String, dynamic> sub, DateTime now) {
+  final next = nextOccurrence(sub, now);
+  if (sub['cadence'] == 'weekly') return (start: next.subtract(const Duration(days: 7)), next: next);
+  final parts = ((sub['time'] as String?) ?? '09:00').split(':');
+  final hh = int.tryParse(parts.isNotEmpty ? parts[0] : '') ?? 9;
+  final mm = int.tryParse(parts.length > 1 ? parts[1] : '') ?? 0;
+  final day = (sub['day'] as num?)?.toInt() ?? 1;
+  final py = next.month == 1 ? next.year - 1 : next.year;
+  final pm = next.month == 1 ? 12 : next.month - 1;
+  final dim = DateTime(py, pm + 1, 0).day;
+  return (start: DateTime(py, pm, day.clamp(1, dim), hh, mm), next: next);
+}
+
+// Stable per-cycle key for the manual override map.
+String paidId(Map<String, dynamic> sub, DateTime now) => '${sub['key']}@${DateFormat('yyyyMMdd').format(billingWindow(sub, now).start)}';
+
+// Automatic detection: paid if ANY matching-merchant expense falls in the current cycle.
+// Identity is merchant only — amount is deliberately ignored (price changes still count).
+bool subPaidAuto(Map<String, dynamic> sub, List<Txn> txns, DateTime now) {
+  final w = billingWindow(sub, now);
+  final key = sub['key'] as String? ?? '';
+  return txns.any((t) => t.type == 'expense' && Db.merchantKey(t.merchant) == key && !t.date.isBefore(w.start) && t.date.isBefore(w.next));
+}
+
+// Resolved status: manual override wins if present for this cycle, else automatic. Reusable by P2.7.8.
+bool subPaidResolved(Map<String, dynamic> sub, List<Txn> txns, Map<String, bool> override, DateTime now) {
+  final id = paidId(sub, now);
+  if (override.containsKey(id)) return override[id]!;
+  return subPaidAuto(sub, txns, now);
+}
+
 class _StatsTab extends StatelessWidget {
   final List<Txn> txns; final Color accent; final double tExp, tInc; final Map<String, int> catB; final int monthBud;
   final List<Map<String, dynamic>> subs; final Set<String> approvedKeys; final Set<String> dismissedSubs; final Set<String> declinedSubs;
   final Future<void> Function(Map<String, dynamic>) onApproveSub; final void Function(String) onDismissSub; final Future<void> Function() onAddManual; final void Function(Map<String, dynamic>) onEditSub; final Future<void> Function(String) onRemoveSub;
-  const _StatsTab({required this.txns, required this.accent, required this.tExp, required this.tInc, required this.catB, required this.monthBud, required this.subs, required this.approvedKeys, required this.dismissedSubs, required this.declinedSubs, required this.onApproveSub, required this.onDismissSub, required this.onAddManual, required this.onEditSub, required this.onRemoveSub});
+  final Map<String, bool> paidOverride; final Future<void> Function(Map<String, dynamic>) onTogglePaid;
+  const _StatsTab({required this.txns, required this.accent, required this.tExp, required this.tInc, required this.catB, required this.monthBud, required this.subs, required this.approvedKeys, required this.dismissedSubs, required this.declinedSubs, required this.onApproveSub, required this.onDismissSub, required this.onAddManual, required this.onEditSub, required this.onRemoveSub, required this.paidOverride, required this.onTogglePaid});
   @override Widget build(BuildContext context) { final cs = Theme.of(context).colorScheme;
     final now = DateTime.now(); final dim = DateUtils.getDaysInMonth(now.year, now.month);
     final dp = now.day; final dl = dim - dp;
@@ -1119,7 +1174,10 @@ class _StatsTab extends StatelessWidget {
                   Text(fmtAmt((s['amount'] as num).toDouble()), style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface)),
                 ]),
                 const SizedBox(height: 2),
-                Text(schedOf(s), style: TextStyle(fontSize: 10.5, color: cs.onSurface.withOpacity(0.4))),
+                Row(children: [
+                  Expanded(child: Text(schedOf(s), style: TextStyle(fontSize: 10.5, color: cs.onSurface.withOpacity(0.4)))),
+                  Builder(builder: (_) { final paid = subPaidResolved(s, txns, paidOverride, DateTime.now()); return GestureDetector(onTap: () => onTogglePaid(s), behavior: HitTestBehavior.opaque, child: Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(borderRadius: BorderRadius.circular(6), color: paid ? const Color(0xFF22C55E).withOpacity(0.14) : cs.onSurface.withOpacity(0.05)), child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(paid ? Icons.check_circle_rounded : Icons.circle_outlined, size: 11, color: paid ? const Color(0xFF22C55E) : cs.onSurface.withOpacity(0.4)), const SizedBox(width: 4), Text(paid ? 'Paid' : 'Mark paid', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: paid ? const Color(0xFF22C55E) : cs.onSurface.withOpacity(0.45)))]))); }),
+                ]),
               ]),
             ))),
             const SizedBox(height: 10),
@@ -1165,6 +1223,7 @@ class _StatsTab extends StatelessWidget {
               const SizedBox(width: 8),
               Text(fmtAmt((it.s['amount'] as num).toDouble()), style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface)),
               const SizedBox(width: 12),
+              if (subPaidResolved(it.s, txns, paidOverride, now)) Padding(padding: const EdgeInsets.only(right: 5), child: Icon(Icons.check_circle_rounded, size: 12, color: const Color(0xFF22C55E))),
               SizedBox(width: 66, child: Text(whenLabel(it.next), textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: accent))),
             ]))),
           ]),
