@@ -102,7 +102,24 @@ class _ShellState extends State<Shell> {
     if (raw != null && raw.isNotEmpty) {
       try { for (final e in (jsonDecode(raw) as List)) subs.add(Map<String, dynamic>.from(e as Map)); } catch (_) {}
     }
-    if (mounted) setState(() { _txns = rows.map((m) => Txn.fromMap(m)).toList(); _catB = cb; _monthBud = mb; _subs = subs; _loading = false; });
+    final parsed = rows.map((m) => Txn.fromMap(m)).toList();
+    // P2.7.4.2 — backfill legacy subs that predate schedule fields. Use REAL
+    // transaction history (day-of-month/weekday + actual charge time) instead of
+    // letting schedOf fall back to the invented "Day 1 · 09:00". Never guess when
+    // real info exists; records with no matching history are left for the user to edit.
+    var subsChanged = false;
+    for (final s in subs) {
+      if (s['day'] != null && s['time'] != null) continue;
+      final k = (s['key'] as String?) ?? '';
+      final hist = parsed.where((t) => t.type == 'expense' && Db.merchantKey(t.merchant) == k).toList()..sort((a, b) => a.date.compareTo(b.date));
+      if (hist.isEmpty) continue;
+      final last = hist.last.date;
+      s['day'] ??= (s['cadence'] == 'weekly') ? last.weekday : last.day;
+      s['time'] ??= '${last.hour.toString().padLeft(2, '0')}:${last.minute.toString().padLeft(2, '0')}';
+      subsChanged = true;
+    }
+    if (subsChanged) await pr.setString('subscriptions', jsonEncode(subs));
+    if (mounted) setState(() { _txns = parsed; _catB = cb; _monthBud = mb; _subs = subs; _loading = false; });
   }
 
   Future<void> _persistSubs() async {
@@ -131,12 +148,28 @@ class _ShellState extends State<Shell> {
     await _load();
   }
 
-  // Manual "+ Add Subscription" — always available, independent of automation.
-  Future<void> _addManualSub() async {
+  // P2.7.4 — upsert by key: edit replaces in place, add appends. Used by the
+  // add/edit sheet. Detection (`recurring`) is never touched.
+  Future<void> _upsertSub(Map<String, dynamic> sub) async {
     HapticFeedback.lightImpact();
-    final nameC = TextEditingController();
-    final amtC = TextEditingController();
-    String cadence = 'monthly';
+    final key = sub['key'] as String;
+    final i = _subs.indexWhere((s) => s['key'] == key);
+    _subs = (i >= 0) ? ([..._subs]..[i] = sub) : [..._subs, sub];
+    await _persistSubs();
+    await _load();
+  }
+
+  // P2.7.4 — unified Add / Edit subscription sheet. Weekly + Monthly only, with
+  // an editable billing schedule (weekday or day-of-month) and time (def 09:00).
+  // Controllers are intentionally not disposed in the async gap (see P2.7.3).
+  Future<void> _subSheet({Map<String, dynamic>? existing}) async {
+    HapticFeedback.lightImpact();
+    final nameC = TextEditingController(text: existing?['name'] as String? ?? '');
+    final amtC = TextEditingController(text: existing != null ? (existing['amount'] as num).toString() : '');
+    String cadence = (existing?['cadence'] as String?) ?? 'monthly';
+    int day = (existing?['day'] as num?)?.toInt() ?? (cadence == 'weekly' ? DateTime.now().weekday : DateTime.now().day);
+    String time = (existing?['time'] as String?) ?? '${DateTime.now().hour.toString().padLeft(2, '0')}:${DateTime.now().minute.toString().padLeft(2, '0')}';
+    const wk = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     final saved = await showModalBottomSheet<bool>(context: context, isScrollControlled: true, backgroundColor: Colors.transparent, builder: (ctx) {
       final cs = Theme.of(ctx).colorScheme;
       return StatefulBuilder(builder: (ctx, setSt) => Padding(
@@ -144,19 +177,28 @@ class _ShellState extends State<Shell> {
         child: Container(
           padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
           decoration: BoxDecoration(color: cs.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(22))),
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Center(child: Container(width: 38, height: 4, decoration: BoxDecoration(borderRadius: BorderRadius.circular(2), color: cs.onSurface.withOpacity(0.15)))),
             const SizedBox(height: 16),
-            Text('Add subscription', style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.w700, color: cs.onSurface)),
+            Text(existing == null ? 'Add subscription' : 'Edit subscription', style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.w700, color: cs.onSurface)),
             const SizedBox(height: 16),
             TextField(controller: nameC, style: TextStyle(color: cs.onSurface), decoration: InputDecoration(labelText: 'Name', hintText: 'e.g. Netflix', filled: true, fillColor: cs.onSurface.withOpacity(0.06), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
             const SizedBox(height: 12),
             TextField(controller: amtC, keyboardType: const TextInputType.numberWithOptions(decimal: true), style: TextStyle(color: cs.onSurface), decoration: InputDecoration(labelText: 'Amount', prefixText: '₹ ', filled: true, fillColor: cs.onSurface.withOpacity(0.06), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
             const SizedBox(height: 12),
-            Row(children: ['weekly', 'monthly', 'yearly'].map((c) { final sel = cadence == c; return Expanded(child: Padding(padding: const EdgeInsets.only(right: 8), child: GestureDetector(onTap: () { HapticFeedback.selectionClick(); setSt(() => cadence = c); }, child: Container(padding: const EdgeInsets.symmetric(vertical: 11), alignment: Alignment.center, decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), color: sel ? widget.accent.withOpacity(0.15) : cs.onSurface.withOpacity(0.04), border: Border.all(color: sel ? widget.accent : Colors.transparent)), child: Text('${c[0].toUpperCase()}${c.substring(1)}', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: sel ? widget.accent : cs.onSurface.withOpacity(0.6))))))); }).toList()),
+            Row(children: ['weekly', 'monthly'].map((c) { final sel = cadence == c; return Expanded(child: Padding(padding: const EdgeInsets.only(right: 8), child: GestureDetector(onTap: () { HapticFeedback.selectionClick(); setSt(() { cadence = c; day = c == 'weekly' ? DateTime.now().weekday : DateTime.now().day; }); }, child: Container(padding: const EdgeInsets.symmetric(vertical: 11), alignment: Alignment.center, decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), color: sel ? widget.accent.withOpacity(0.15) : cs.onSurface.withOpacity(0.04), border: Border.all(color: sel ? widget.accent : Colors.transparent)), child: Text('${c[0].toUpperCase()}${c.substring(1)}', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: sel ? widget.accent : cs.onSurface.withOpacity(0.6))))))); }).toList()),
+            const SizedBox(height: 16),
+            Text(cadence == 'weekly' ? 'Billing day' : 'Billing date', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.5))),
+            const SizedBox(height: 8),
+            if (cadence == 'weekly')
+              Wrap(spacing: 6, runSpacing: 6, children: List.generate(7, (i) { final d = i + 1; final sel = day == d; return GestureDetector(onTap: () { HapticFeedback.selectionClick(); setSt(() => day = d); }, child: Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), decoration: BoxDecoration(borderRadius: BorderRadius.circular(9), color: sel ? widget.accent.withOpacity(0.15) : cs.onSurface.withOpacity(0.04), border: Border.all(color: sel ? widget.accent : Colors.transparent)), child: Text(wk[i], style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: sel ? widget.accent : cs.onSurface.withOpacity(0.6))))); }))
+            else
+              Wrap(spacing: 6, runSpacing: 6, children: List.generate(31, (i) { final d = i + 1; final sel = day == d; return GestureDetector(onTap: () { HapticFeedback.selectionClick(); setSt(() => day = d); }, child: Container(width: 34, height: 34, alignment: Alignment.center, decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), color: sel ? widget.accent.withOpacity(0.15) : cs.onSurface.withOpacity(0.04), border: Border.all(color: sel ? widget.accent : Colors.transparent)), child: Text('$d', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: sel ? widget.accent : cs.onSurface.withOpacity(0.6))))); })),
+            const SizedBox(height: 14),
+            GestureDetector(behavior: HitTestBehavior.opaque, onTap: () async { final parts = time.split(':'); final picked = await showTimePicker(context: ctx, initialTime: TimeOfDay(hour: int.tryParse(parts.first) ?? 9, minute: int.tryParse(parts.length > 1 ? parts[1] : '0') ?? 0), builder: (c, w) => Theme(data: Theme.of(c).copyWith(colorScheme: Theme.of(c).colorScheme.copyWith(primary: widget.accent)), child: w!)); if (picked != null) setSt(() => time = '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}'); }, child: Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13), decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: cs.onSurface.withOpacity(0.06)), child: Row(children: [Icon(Icons.schedule_rounded, size: 16, color: widget.accent), const SizedBox(width: 10), Text('Billing time', style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.6))), const Spacer(), Text(time, style: GoogleFonts.jetBrainsMono(fontSize: 14, fontWeight: FontWeight.w700, color: cs.onSurface))]))),
             const SizedBox(height: 18),
-            SizedBox(width: double.infinity, child: ElevatedButton(onPressed: () => Navigator.pop(ctx, true), style: ElevatedButton.styleFrom(backgroundColor: widget.accent, foregroundColor: Colors.white, elevation: 0, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: const Text('Save', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)))),
-          ]),
+            SizedBox(width: double.infinity, child: ElevatedButton(onPressed: () => Navigator.pop(ctx, true), style: ElevatedButton.styleFrom(backgroundColor: widget.accent, foregroundColor: Colors.white, elevation: 0, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: Text(existing == null ? 'Save' : 'Update', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)))),
+          ])),
         ),
       ));
     });
@@ -164,14 +206,9 @@ class _ShellState extends State<Shell> {
       final name = nameC.text.trim();
       final amt = double.tryParse(amtC.text.replaceAll(',', '').replaceAll('₹', '').trim()) ?? 0;
       if (name.isNotEmpty && amt > 0) {
-        await _approveSub({'key': Db.merchantKey(name), 'name': Db.merchantDisplay(name), 'amount': amt, 'cadence': cadence, 'source': 'manual'});
+        await _upsertSub({'key': existing?['key'] as String? ?? Db.merchantKey(name), 'name': Db.merchantDisplay(name), 'amount': amt, 'cadence': cadence, 'day': day, 'time': time, 'source': existing?['source'] ?? 'manual'});
       }
     }
-    // nameC/amtC are deliberately NOT disposed here. showModalBottomSheet's future
-    // resolves at pop time while the sheet's exit animation is still rebuilding the
-    // TextField (main.dart:152); disposing across the awaited _approveSub above ran
-    // mid-animation and threw "TextEditingController used after disposed". They're
-    // small, transient, and GC-reclaimed once this closure is released.
   }
 
   // Session-only dismiss — no persistence, recurrence detection unaffected.
@@ -307,7 +344,7 @@ class _ShellState extends State<Shell> {
       _Home(txns: _txns, catB: _catB, monthBud: _monthBud, accent: widget.accent, name: widget.name, tExp: tExp, tInc: tInc, notifOk: _notifOk, onNotif: () { NB.openNotif(); Future.delayed(const Duration(seconds: 3), _checkNotif); }, onAdd: _showAdd, onTap: _showEdit, onEditBud: _editMonthBud, onDelete: _delTxn),
       _Activity(txns: _txns, onTap: _showEdit, onDelete: _delTxn),
       _BudgetsTab(txns: _txns, catB: _catB, monthBud: _monthBud, accent: widget.accent, onEditTotal: _editMonthBud, onEditCat: _editCatBud),
-      _StatsTab(txns: _txns, accent: widget.accent, tExp: tExp, tInc: tInc, catB: _catB, monthBud: _monthBud, subs: _subs, approvedKeys: _subs.map((s) => s['key'] as String).toSet(), dismissedSubs: _dismissedSubs, onApproveSub: _approveSub, onDismissSub: _dismissSub, onAddManual: _addManualSub, onRemoveSub: _removeSub),
+      _StatsTab(txns: _txns, accent: widget.accent, tExp: tExp, tInc: tInc, catB: _catB, monthBud: _monthBud, subs: _subs, approvedKeys: _subs.map((s) => s['key'] as String).toSet(), dismissedSubs: _dismissedSubs, onApproveSub: _approveSub, onDismissSub: _dismissSub, onAddManual: () => _subSheet(), onEditSub: (s) => _subSheet(existing: s), onRemoveSub: _removeSub),
       _Settings(accent: widget.accent, isDark: widget.isDark, notifOk: _notifOk, scaleIdx: widget.scaleIdx, tTheme: widget.tTheme, sAccent: widget.sAccent, sScale: widget.sScale, onNotif: () { NB.openNotif(); Future.delayed(const Duration(seconds: 3), _checkNotif); }),
     ];
     return Scaffold(body: Stack(children: [
@@ -635,8 +672,8 @@ class _BudgetsTabState extends State<_BudgetsTab> {
 class _StatsTab extends StatelessWidget {
   final List<Txn> txns; final Color accent; final double tExp, tInc; final Map<String, int> catB; final int monthBud;
   final List<Map<String, dynamic>> subs; final Set<String> approvedKeys; final Set<String> dismissedSubs;
-  final Future<void> Function(Map<String, dynamic>) onApproveSub; final void Function(String) onDismissSub; final Future<void> Function() onAddManual; final Future<void> Function(String) onRemoveSub;
-  const _StatsTab({required this.txns, required this.accent, required this.tExp, required this.tInc, required this.catB, required this.monthBud, required this.subs, required this.approvedKeys, required this.dismissedSubs, required this.onApproveSub, required this.onDismissSub, required this.onAddManual, required this.onRemoveSub});
+  final Future<void> Function(Map<String, dynamic>) onApproveSub; final void Function(String) onDismissSub; final Future<void> Function() onAddManual; final void Function(Map<String, dynamic>) onEditSub; final Future<void> Function(String) onRemoveSub;
+  const _StatsTab({required this.txns, required this.accent, required this.tExp, required this.tInc, required this.catB, required this.monthBud, required this.subs, required this.approvedKeys, required this.dismissedSubs, required this.onApproveSub, required this.onDismissSub, required this.onAddManual, required this.onEditSub, required this.onRemoveSub});
   @override Widget build(BuildContext context) { final cs = Theme.of(context).colorScheme;
     final now = DateTime.now(); final dim = DateUtils.getDaysInMonth(now.year, now.month);
     final dp = now.day; final dl = dim - dp;
@@ -668,8 +705,8 @@ class _StatsTab extends StatelessWidget {
     // P2.7.3 — store the representative charge (median) + cadence directly. No
     // monthly-normalization math: users think in "₹X / month", not formulas.
     final recurring = <String>{};
-    final recurMeta = <String, ({double amount, bool weekly, String disp})>{};
-    byM.forEach((m, list) { if (list.length < 3) return; final s = [...list]..sort((a, b) => a.date.compareTo(b.date)); final amts = s.map((t) => t.amount).toList(); final avg = amts.reduce((a, b) => a + b) / amts.length; if (avg <= 0) return; if (!amts.every((a) => (a - avg).abs() / avg <= 0.2)) return; final gaps = <int>[]; for (var i = 1; i < s.length; i++) gaps.add(s[i].date.difference(s[i-1].date).inDays); final ag = gaps.reduce((a, b) => a + b) / gaps.length; if (!gaps.every((g) => (g - ag).abs() <= 4)) return; final weekly = ag >= 6 && ag <= 8; final monthly = ag >= 25 && ag <= 35; if (weekly || monthly) { recurring.add(m); final sa = [...amts]..sort(); recurMeta[m] = (amount: sa[sa.length ~/ 2], weekly: weekly, disp: Db.merchantDisplay(s.last.merchant)); } });
+    final recurMeta = <String, ({double amount, bool weekly, int day, String disp})>{};
+    byM.forEach((m, list) { if (list.length < 3) return; final s = [...list]..sort((a, b) => a.date.compareTo(b.date)); final amts = s.map((t) => t.amount).toList(); final avg = amts.reduce((a, b) => a + b) / amts.length; if (avg <= 0) return; if (!amts.every((a) => (a - avg).abs() / avg <= 0.2)) return; final gaps = <int>[]; for (var i = 1; i < s.length; i++) gaps.add(s[i].date.difference(s[i-1].date).inDays); final ag = gaps.reduce((a, b) => a + b) / gaps.length; if (!gaps.every((g) => (g - ag).abs() <= 4)) return; final weekly = ag >= 6 && ag <= 8; final monthly = ag >= 25 && ag <= 35; if (weekly || monthly) { recurring.add(m); final sa = [...amts]..sort(); recurMeta[m] = (amount: sa[sa.length ~/ 2], weekly: weekly, day: weekly ? s.last.date.weekday : s.last.date.day, disp: Db.merchantDisplay(s.last.merchant)); } });
 
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
       Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 14), child: Text('Analytics', style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w800, color: cs.onSurface))),
@@ -913,6 +950,10 @@ class _StatsTab extends StatelessWidget {
             .toList()..sort((a, b) => b.value.amount.compareTo(a.value.amount));
         if (pend.isEmpty) return const SizedBox.shrink();
         final e = pend.first;
+        // P2.7.4 — auto schedule: day comes from history (recurMeta); there is no
+        // real billing *time* in txn history, so use the current time rather than a
+        // hardcoded guess. Never invent schedule info when real info exists.
+        final nowHM = '${DateTime.now().hour.toString().padLeft(2, '0')}:${DateTime.now().minute.toString().padLeft(2, '0')}';
         return Container(
           margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
           padding: const EdgeInsets.all(14),
@@ -931,7 +972,7 @@ class _StatsTab extends StatelessWidget {
             Row(mainAxisAlignment: MainAxisAlignment.end, children: [
               OutlinedButton(onPressed: () => onDismissSub(e.key), style: OutlinedButton.styleFrom(foregroundColor: cs.onSurface.withOpacity(0.7), side: BorderSide(color: cs.onSurface.withOpacity(0.22)), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))), child: const Text('Not now', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
               const SizedBox(width: 4),
-              ElevatedButton(onPressed: () => onApproveSub({'key': e.key, 'name': e.value.disp, 'amount': e.value.amount, 'cadence': e.value.weekly ? 'weekly' : 'monthly', 'source': 'auto'}), style: ElevatedButton.styleFrom(backgroundColor: accent, foregroundColor: Colors.white, elevation: 0, padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))), child: const Text('Add', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700))),
+              ElevatedButton(onPressed: () => onApproveSub({'key': e.key, 'name': e.value.disp, 'amount': e.value.amount, 'cadence': e.value.weekly ? 'weekly' : 'monthly', 'day': e.value.day, 'time': nowHM, 'source': 'auto'}), style: ElevatedButton.styleFrom(backgroundColor: accent, foregroundColor: Colors.white, elevation: 0, padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))), child: const Text('Add', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700))),
             ]),
           ]),
         );
@@ -939,7 +980,8 @@ class _StatsTab extends StatelessWidget {
       // ── P2.7.1/3 Subscriptions — ONLY user-approved subs (auto or manual) ──
       Builder(builder: (_) {
         final sorted = [...subs]..sort((a, b) => (b['amount'] as num).compareTo(a['amount'] as num));
-        double monthlyOf(Map<String, dynamic> s) { final a = (s['amount'] as num).toDouble(); switch (s['cadence']) { case 'weekly': return a * 52 / 12; case 'yearly': return a / 12; default: return a; } }
+        double monthlyOf(Map<String, dynamic> s) { final a = (s['amount'] as num).toDouble(); return s['cadence'] == 'weekly' ? a * 52 / 12 : a; }
+        String schedOf(Map<String, dynamic> s) { final t = (s['time'] as String?) ?? '09:00'; final d = (s['day'] as num?)?.toInt() ?? 1; if (s['cadence'] == 'weekly') { const w = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']; return '${w[(d - 1).clamp(0, 6)]} · $t'; } return 'Day $d · $t'; }
         final est = sorted.fold(0.0, (t, s) => t + monthlyOf(s));
         return Container(
           margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
@@ -957,16 +999,21 @@ class _StatsTab extends StatelessWidget {
             const SizedBox(height: 4),
             Text(sorted.isEmpty ? 'No subscriptions yet — approve a detected one or add manually.' : '${sorted.length} active ${sorted.length == 1 ? 'subscription' : 'subscriptions'}', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))),
             if (sorted.isNotEmpty) const SizedBox(height: 6),
-            ...sorted.map((s) => Padding(padding: const EdgeInsets.symmetric(vertical: 5), child: GestureDetector(
+            ...sorted.map((s) => Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: GestureDetector(
+              onTap: () => onEditSub(s),
               onLongPress: () => onRemoveSub(s['key'] as String),
               behavior: HitTestBehavior.opaque,
-              child: Row(children: [
-                Expanded(child: Row(children: [
-                  Flexible(child: Text(s['name'] as String? ?? '', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis)),
-                  const SizedBox(width: 8),
-                  Container(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2), decoration: BoxDecoration(borderRadius: BorderRadius.circular(6), color: accent.withOpacity(0.12)), child: Text('${(s['cadence'] as String)[0].toUpperCase()}${(s['cadence'] as String).substring(1)}', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: accent))),
-                ])),
-                Text(fmtAmt((s['amount'] as num).toDouble()), style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface)),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Expanded(child: Row(children: [
+                    Flexible(child: Text(s['name'] as String? ?? '', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis)),
+                    const SizedBox(width: 8),
+                    Container(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2), decoration: BoxDecoration(borderRadius: BorderRadius.circular(6), color: accent.withOpacity(0.12)), child: Text('${(s['cadence'] as String)[0].toUpperCase()}${(s['cadence'] as String).substring(1)}', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: accent))),
+                  ])),
+                  Text(fmtAmt((s['amount'] as num).toDouble()), style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface)),
+                ]),
+                const SizedBox(height: 2),
+                Text(schedOf(s), style: TextStyle(fontSize: 10.5, color: cs.onSurface.withOpacity(0.4))),
               ]),
             ))),
             const SizedBox(height: 10),
@@ -979,7 +1026,7 @@ class _StatsTab extends StatelessWidget {
                 Text('Add subscription', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: accent)),
               ]),
             )),
-            if (sorted.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text('Long-press a subscription to remove it.', style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.3)))),
+            if (sorted.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text('Tap to edit · long-press to remove.', style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.3)))),
           ]),
         );
       }),
