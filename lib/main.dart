@@ -148,6 +148,11 @@ class _ShellState extends State<Shell> {
     if (key.isEmpty || _subs.any((s) => s['key'] == key)) return;
     _subs = [..._subs, sub];
     await _persistSubs();
+    // P2.7.9 — teach autocat: future charges from this merchant will pre-select
+    // the Subscriptions category. Existing learning still wins on user override.
+    final scid = _subsCatId();
+    final mname = (sub['name'] as String?) ?? '';
+    if (scid.isNotEmpty && mname.isNotEmpty) await Db.setAutoCat(mname, scid);
     await _load();
   }
 
@@ -168,6 +173,10 @@ class _ShellState extends State<Shell> {
     final i = _subs.indexWhere((s) => s['key'] == key);
     _subs = (i >= 0) ? ([..._subs]..[i] = sub) : [..._subs, sub];
     await _persistSubs();
+    // P2.7.9 — keep autocat in sync (idempotent; rename-safe on edit).
+    final scid = _subsCatId();
+    final mname = (sub['name'] as String?) ?? '';
+    if (scid.isNotEmpty && mname.isNotEmpty) await Db.setAutoCat(mname, scid);
     await _load();
   }
 
@@ -248,6 +257,31 @@ class _ShellState extends State<Shell> {
     await pr.setString('sub_paid_override', jsonEncode(_paidOverride));
   }
 
+  // P2.7.9 — id of the "Subscriptions" expense category (resolved at call-site so
+  // a rename anywhere in models/category.dart can't desync this). Returns '' if
+  // the category was removed; callers must handle that.
+  String _subsCatId() { try { return cats.firstWhere((c) => c.name.toLowerCase() == 'subscriptions').id; } catch (_) { return ''; } }
+
+  // P2.7.9 — price intelligence. After an expense lands, if it matches an
+  // approved subscription and the amount diverges meaningfully from the stored
+  // price, update the sub in place and remember the previous price so the
+  // Insights card can surface "₹199 → ₹249". Identity = merchant + cadence +
+  // schedule; amount is NEVER part of identity — we update, never duplicate.
+  Future<void> _maybeUpdateSubPrice(Txn t) async {
+    if (t.type != 'expense') return;
+    final key = Db.merchantKey(t.merchant);
+    if (key.isEmpty) return;
+    final i = _subs.indexWhere((s) => s['key'] == key);
+    if (i < 0) return;
+    final stored = (_subs[i]['amount'] as num).toDouble();
+    if (stored <= 0) return;
+    final diff = (t.amount - stored).abs();
+    if (diff < 1 || diff / stored < 0.01) return;
+    _subs = [..._subs]..[i] = {..._subs[i], 'amount': t.amount, 'previousAmount': stored, 'priceChangedAt': t.date.toIso8601String()};
+    await _persistSubs();
+    if (mounted) setState(() {});
+  }
+
   // P2.7.5.1 — heuristic confidence for entry-time suggestions (no DB, history-based):
   //   low  (food delivery / rides / marketplaces / eateries) → never ask here; P2.7.2 handles it.
   //   high (clear subscription brands)                        → ask on the first charge.
@@ -274,7 +308,11 @@ class _ShellState extends State<Shell> {
     if (_offeredSubs.contains(key)) return;           // already offered this session
     // P2.7.5.1 — confidence gate: don't interrupt for ordinary spending. A skip here
     // does NOT mark the merchant offered, so it can still ask once confidence rises.
-    if (!_entryConfident(t, key)) return;
+    // P2.7.9 — picking the Subscriptions category at entry IS the confident signal;
+    // bypass the heuristic gate entirely. Treats user intent as authoritative.
+    final scid = _subsCatId();
+    final categoryIsSubs = scid.isNotEmpty && t.category == scid;
+    if (!categoryIsSubs && !_entryConfident(t, key)) return;
     _offeredSubs.add(key);
     // Let the Add sheet finish its exit animation before presenting this one.
     await Future.delayed(const Duration(milliseconds: 350));
@@ -325,7 +363,10 @@ class _ShellState extends State<Shell> {
       if (type == 'credit') { if (mounted) _showIncCat(amt, merch, acc); }
       else {
         final auto = await Db.getAutoCat(merch);
-        if (auto != null) { await Db.insTxn(Txn(id: _uid(), amount: amt, merchant: merch, category: auto, account: acc, type: 'expense', date: DateTime.now()).toMap()); await _load();
+        if (auto != null) {
+          final autoTxn = Txn(id: _uid(), amount: amt, merchant: merch, category: auto, account: acc, type: 'expense', date: DateTime.now());
+          await Db.insTxn(autoTxn.toMap()); await _load();
+          await _maybeUpdateSubPrice(autoTxn); // P2.7.9
           if (mounted) _snack('Auto: ${fmtAmt(amt)} → ${fCat(auto)?.name}', bg: const Color(0xFF22C55E));
         } else if (mounted) { _showExpCat(amt, merch, acc); }
       }
@@ -348,8 +389,12 @@ class _ShellState extends State<Shell> {
 
   void _showExpCat(double amt, String merch, String acc) => showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
     builder: (ctx) => _CatSheet(amount: amt, merchant: merch, accent: widget.accent, onSelect: (catId, note, auto) async {
-      await Db.insTxn(Txn(id: _uid(), amount: amt, merchant: merch, category: catId, account: acc, type: 'expense', date: DateTime.now(), note: note).toMap());
-      if (auto) await Db.setAutoCat(merch, catId); await _load(); if (ctx.mounted) Navigator.pop(ctx); }));
+      final t = Txn(id: _uid(), amount: amt, merchant: merch, category: catId, account: acc, type: 'expense', date: DateTime.now(), note: note);
+      await Db.insTxn(t.toMap());
+      if (auto) await Db.setAutoCat(merch, catId); await _load();
+      await _maybeUpdateSubPrice(t); // P2.7.9
+      await _maybeSuggestSub(t);     // P2.7.9 — Category → Subscription bridge
+      if (ctx.mounted) Navigator.pop(ctx); }));
 
   void _showIncCat(double amt, String merch, String acc) => showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
     builder: (ctx) => _IncCatSheet(amount: amt, merchant: merch, accent: widget.accent, onSelect: (catId, note) async {
@@ -361,6 +406,7 @@ class _ShellState extends State<Shell> {
       await Db.insTxn(t.toMap());
       if (t.type == 'expense' && t.merchant.trim().isNotEmpty && t.category.isNotEmpty) await Db.learnMerchant(t.merchant, t.category);
       await _load(); if (ctx.mounted) Navigator.pop(ctx);
+      await _maybeUpdateSubPrice(t); // P2.7.9
       _maybeSuggestSub(t); }));
 
   void _showEdit(Txn t) => showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
@@ -369,6 +415,7 @@ class _ShellState extends State<Shell> {
         await Db.updTxn(u.toMap());
         if (u.type == 'expense' && u.merchant.trim().isNotEmpty && u.category.isNotEmpty) await Db.learnMerchant(u.merchant, u.category);
         await _load(); if (ctx.mounted) Navigator.pop(ctx);
+        await _maybeUpdateSubPrice(u); // P2.7.9
         _snack('Changes saved', bg: const Color(0xFF22C55E)); },
       onDelete: () async { final saved = t.toMap(); await Db.delTxn(t.id); await _load(); if (ctx.mounted) Navigator.pop(ctx);
         _snack('Transaction deleted', bg: const Color(0xFFEF4444), action: SnackBarAction(label: 'UNDO', textColor: Colors.white, onPressed: () async { HapticFeedback.lightImpact(); await Db.insTxn(saved); await _load(); }), seconds: 4); },
@@ -1199,9 +1246,12 @@ class _StatsTab extends StatelessWidget {
         if (subs.isEmpty) return const SizedBox.shrink();
         final now = DateTime.now();
         final items = subs.map((sub) => (s: sub, next: nextOccurrence(sub, now))).toList()..sort((a, b) => a.next.compareTo(b.next));
+        // P2.7.8 fix — use DateUtils.dateOnly so we compare calendar days, not
+        // wall-clock durations. Robust against hh:mm drift in nextOccurrence.
+        final today = DateUtils.dateOnly(now);
         String whenLabel(DateTime d) {
-          final days = DateTime(d.year, d.month, d.day).difference(DateTime(now.year, now.month, now.day)).inDays;
-          if (days <= 0) return 'Today';
+          final days = DateUtils.dateOnly(d).difference(today).inDays;
+          if (days == 0) return 'Today';
           if (days == 1) return 'Tomorrow';
           return DateFormat('d MMM').format(d);
         }
@@ -1226,6 +1276,100 @@ class _StatsTab extends StatelessWidget {
               if (subPaidResolved(it.s, txns, paidOverride, now)) Padding(padding: const EdgeInsets.only(right: 5), child: Icon(Icons.check_circle_rounded, size: 12, color: const Color(0xFF22C55E))),
               SizedBox(width: 66, child: Text(whenLabel(it.next), textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: accent))),
             ]))),
+          ]),
+        );
+      }),
+      // ── P2.7.8 Subscription Insights — derived analytics over approved subs ──
+      // Reuses nextOccurrence / billingWindow / subPaidResolved. Pure read-side;
+      // never writes. Each alert row is conditional — empty states stay quiet.
+      Builder(builder: (_) {
+        if (subs.isEmpty) return const SizedBox.shrink();
+        final now = DateTime.now();
+        double monthlyOf(Map<String, dynamic> s) { final a = (s['amount'] as num).toDouble(); return s['cadence'] == 'weekly' ? a * 52 / 12 : a; }
+        final monthlySpend = subs.fold(0.0, (t, s) => t + monthlyOf(s));
+        final largest = [...subs]..sort((a, b) => (b['amount'] as num).compareTo(a['amount'] as num));
+        final weekly = subs.where((s) => s['cadence'] == 'weekly').toList();
+        final monthly = subs.where((s) => s['cadence'] == 'monthly').toList();
+        final weeklyAmt = weekly.fold(0.0, (t, s) => t + monthlyOf(s));
+        final monthlyAmt = monthly.fold(0.0, (t, s) => t + monthlyOf(s));
+        // Overdue: current cycle started > 2 days ago AND not paid this cycle.
+        final overdue = subs.where((s) {
+          final w = billingWindow(s, now);
+          if (!now.isAfter(w.start.add(const Duration(days: 2)))) return false;
+          return !subPaidResolved(s, txns, paidOverride, now);
+        }).toList();
+        // Inactive: no expense from this merchant in last 60d. Uses merchantKey
+        // for canonical matching (consistent with the rest of the codebase).
+        final cutoff60 = now.subtract(const Duration(days: 60));
+        final cutoff90 = now.subtract(const Duration(days: 90));
+        DateTime? lastSeen(String key) {
+          DateTime? last;
+          for (final t in txns) { if (t.type != 'expense') continue; if (Db.merchantKey(t.merchant) != key) continue; if (last == null || t.date.isAfter(last)) last = t.date; }
+          return last;
+        }
+        final inactive = <(Map<String, dynamic>, DateTime?)>[];
+        final cancelCandidates = <(Map<String, dynamic>, DateTime?)>[];
+        for (final s in subs) {
+          final ls = lastSeen((s['key'] as String?) ?? '');
+          if (ls == null || ls.isBefore(cutoff60)) inactive.add((s, ls));
+          if (ls == null || ls.isBefore(cutoff90)) cancelCandidates.add((s, ls));
+        }
+        // Price changes within the last 60 days. Stored on the sub itself
+        // (previousAmount + priceChangedAt) by _maybeUpdateSubPrice.
+        final priceChanges = subs.where((s) {
+          if (s['previousAmount'] == null) return false;
+          final ts = DateTime.tryParse((s['priceChangedAt'] as String?) ?? '');
+          return ts != null && ts.isAfter(cutoff60);
+        }).toList();
+
+        Widget metric(String label, String value) => Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.45))),
+          const SizedBox(height: 3),
+          Text(value, style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface)),
+        ]));
+        Widget alertRow(IconData ic, Color c, String text) => Padding(padding: const EdgeInsets.only(top: 8), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(ic, size: 13, color: c), const SizedBox(width: 8),
+          Expanded(child: Text(text, style: TextStyle(fontSize: 11.5, color: cs.onSurface.withOpacity(0.75), height: 1.35))),
+        ]));
+
+        return Container(
+          margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Icon(Icons.insights_rounded, size: 16, color: accent),
+              const SizedBox(width: 8),
+              Text('Subscription Insights', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
+            ]),
+            const SizedBox(height: 12),
+            Row(children: [
+              metric('Monthly spend', '₹${fmtInt(monthlySpend.round())}'),
+              metric('Largest', '${largest.first['name']} ₹${fmtInt((largest.first['amount'] as num).round())}'),
+            ]),
+            const SizedBox(height: 12),
+            Row(children: [
+              metric('Weekly · ${weekly.length}', '≈ ₹${fmtInt(weeklyAmt.round())}/mo'),
+              metric('Monthly · ${monthly.length}', '≈ ₹${fmtInt(monthlyAmt.round())}/mo'),
+            ]),
+            if (overdue.isNotEmpty)
+              alertRow(Icons.warning_amber_rounded, const Color(0xFFF59E0B),
+                overdue.length == 1
+                  ? '${overdue.first['name']} is overdue this cycle'
+                  : '${overdue.length} subscriptions overdue this cycle'),
+            if (priceChanges.isNotEmpty)
+              ...priceChanges.map((s) => alertRow(Icons.trending_up_rounded, accent,
+                '${s['name']} price changed  ₹${fmtInt(((s['previousAmount'] as num).toDouble()).round())} → ₹${fmtInt(((s['amount'] as num).toDouble()).round())}')),
+            if (inactive.isNotEmpty)
+              alertRow(Icons.nightlight_round, cs.onSurface.withOpacity(0.5),
+                inactive.length == 1
+                  ? '${inactive.first.$1['name']} — no charges in 60 days'
+                  : '${inactive.length} inactive (no charges in 60d)'),
+            if (cancelCandidates.isNotEmpty)
+              alertRow(Icons.cancel_outlined, const Color(0xFFEF4444),
+                cancelCandidates.length == 1
+                  ? 'Consider cancelling ${cancelCandidates.first.$1['name']} — silent for 90+ days'
+                  : '${cancelCandidates.length} candidates to cancel — silent for 90+ days'),
           ]),
         );
       }),
