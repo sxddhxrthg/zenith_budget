@@ -751,6 +751,30 @@ class _BudgetsTabState extends State<_BudgetsTab> {
 
 // ═══ STATS ═══
 
+// P2.7.6 — next billing occurrence for a subscription (weekly/monthly only).
+// Pure: derived from stored cadence/day/time. Identity is merchant+schedule; amount
+// is irrelevant here. Monthly clamps day to the month length (e.g. day 31 in Feb).
+DateTime nextOccurrence(Map<String, dynamic> sub, DateTime now) {
+  final parts = ((sub['time'] as String?) ?? '09:00').split(':');
+  final hh = int.tryParse(parts.isNotEmpty ? parts[0] : '') ?? 9;
+  final mm = int.tryParse(parts.length > 1 ? parts[1] : '') ?? 0;
+  final day = (sub['day'] as num?)?.toInt() ?? 1;
+  if (sub['cadence'] == 'weekly') {
+    final target = day.clamp(1, 7);
+    final delta = (target - now.weekday) % 7; // Dart % is non-negative for positive divisor
+    var cand = DateTime(now.year, now.month, now.day, hh, mm).add(Duration(days: delta));
+    if (!cand.isAfter(now)) cand = cand.add(const Duration(days: 7));
+    return cand;
+  }
+  DateTime onMonth(int y, int m) {
+    final dim = DateTime(y, m + 1, 0).day; // last day of month m
+    return DateTime(y, m, day.clamp(1, dim), hh, mm);
+  }
+  var cand = onMonth(now.year, now.month);
+  if (!cand.isAfter(now)) cand = onMonth(now.month == 12 ? now.year + 1 : now.year, now.month == 12 ? 1 : now.month + 1);
+  return cand;
+}
+
 class _StatsTab extends StatelessWidget {
   final List<Txn> txns; final Color accent; final double tExp, tInc; final Map<String, int> catB; final int monthBud;
   final List<Map<String, dynamic>> subs; final Set<String> approvedKeys; final Set<String> dismissedSubs; final Set<String> declinedSubs;
@@ -1109,6 +1133,40 @@ class _StatsTab extends StatelessWidget {
               ]),
             )),
             if (sorted.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text('Tap to edit · long-press to remove.', style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.3)))),
+          ]),
+        );
+      }),
+      // ── P2.7.6 Upcoming Payments — next charge per subscription, nearest first ──
+      Builder(builder: (_) {
+        if (subs.isEmpty) return const SizedBox.shrink();
+        final now = DateTime.now();
+        final items = subs.map((sub) => (s: sub, next: nextOccurrence(sub, now))).toList()..sort((a, b) => a.next.compareTo(b.next));
+        String whenLabel(DateTime d) {
+          final days = DateTime(d.year, d.month, d.day).difference(DateTime(now.year, now.month, now.day)).inDays;
+          if (days <= 0) return 'Today';
+          if (days == 1) return 'Tomorrow';
+          return DateFormat('d MMM').format(d);
+        }
+        return Container(
+          margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: cs.surface),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Icon(Icons.schedule_rounded, size: 16, color: accent),
+              const SizedBox(width: 8),
+              Text('Upcoming', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
+            ]),
+            const SizedBox(height: 4),
+            Text('Next ${items.length == 1 ? 'payment' : 'payments'}', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))),
+            const SizedBox(height: 6),
+            ...items.map((it) => Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Row(children: [
+              Expanded(child: Text(it.s['name'] as String? ?? '', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis)),
+              const SizedBox(width: 8),
+              Text(fmtAmt((it.s['amount'] as num).toDouble()), style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface)),
+              const SizedBox(width: 12),
+              SizedBox(width: 66, child: Text(whenLabel(it.next), textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: accent))),
+            ]))),
           ]),
         );
       }),
