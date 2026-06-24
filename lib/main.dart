@@ -20,6 +20,7 @@ import 'widgets/transaction_tile.dart';
 import 'services/db_service.dart';
 import 'services/settings_service.dart';
 import 'services/notification_service.dart';
+import 'utils/prefs_keys.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -51,10 +52,10 @@ class ZenithApp extends StatefulWidget { const ZenithApp({super.key}); @override
 class _ZenithAppState extends State<ZenithApp> {
   ThemeMode _mode = ThemeMode.dark; Color _accent = const Color(0xFF00D4FF); int _scaleIdx = 2;
   @override void initState() { super.initState(); _load(); }
-  Future<void> _load() async { final p = await SharedPreferences.getInstance(); setState(() { _mode = p.getString('theme') == 'light' ? ThemeMode.light : ThemeMode.dark; _accent = accents[(p.getInt('accent') ?? 0).clamp(0, 7)]; _scaleIdx = (p.getInt('font_scale') ?? 2).clamp(0, 4); }); }
-  void _tTheme() async { final p = await SharedPreferences.getInstance(); setState(() { _mode = _mode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark; p.setString('theme', _mode == ThemeMode.light ? 'light' : 'dark'); }); }
-  void _sAccent(int i) async { final p = await SharedPreferences.getInstance(); setState(() { _accent = accents[i.clamp(0, 7)]; p.setInt('accent', i); }); }
-  void _sScale(int i) async { final p = await SharedPreferences.getInstance(); setState(() { _scaleIdx = i.clamp(0, 4); p.setInt('font_scale', _scaleIdx); }); }
+  Future<void> _load() async { final p = await SharedPreferences.getInstance(); setState(() { _mode = p.getString(PrefsKeys.theme) == 'light' ? ThemeMode.light : ThemeMode.dark; _accent = accents[(p.getInt(PrefsKeys.accent) ?? 0).clamp(0, 7)]; _scaleIdx = (p.getInt(PrefsKeys.fontScale) ?? 2).clamp(0, 4); }); }
+  void _tTheme() async { final p = await SharedPreferences.getInstance(); setState(() { _mode = _mode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark; p.setString(PrefsKeys.theme, _mode == ThemeMode.light ? 'light' : 'dark'); }); }
+  void _sAccent(int i) async { final p = await SharedPreferences.getInstance(); setState(() { _accent = accents[i.clamp(0, 7)]; p.setInt(PrefsKeys.accent, i); }); }
+  void _sScale(int i) async { final p = await SharedPreferences.getInstance(); setState(() { _scaleIdx = i.clamp(0, 4); p.setInt(PrefsKeys.fontScale, _scaleIdx); }); }
 
   @override Widget build(BuildContext context) {
     final scale = scales[_scaleIdx];
@@ -105,7 +106,7 @@ class _ShellState extends State<Shell> {
     final cb = await Db.catBudgets();
     final mb = await getMonthlyBudget();
     final pr = await SharedPreferences.getInstance();
-    final raw = pr.getString('subscriptions');
+    final raw = pr.getString(PrefsKeys.subscriptions);
     final subs = <Map<String, dynamic>>[];
     if (raw != null && raw.isNotEmpty) {
       try { for (final e in (jsonDecode(raw) as List)) subs.add(Map<String, dynamic>.from(e as Map)); } catch (_) {}
@@ -126,17 +127,17 @@ class _ShellState extends State<Shell> {
       s['time'] ??= '${last.hour.toString().padLeft(2, '0')}:${last.minute.toString().padLeft(2, '0')}';
       subsChanged = true;
     }
-    if (subsChanged) await pr.setString('subscriptions', jsonEncode(subs));
-    final declined = (pr.getStringList('declined_sub_merchants') ?? const []).toSet();
+    if (subsChanged) await pr.setString(PrefsKeys.subscriptions, jsonEncode(subs));
+    final declined = (pr.getStringList(PrefsKeys.declinedSubMerchants) ?? const []).toSet();
     final po = <String, bool>{};
-    final rawPaid = pr.getString('sub_paid_override');
+    final rawPaid = pr.getString(PrefsKeys.subPaidOverride);
     if (rawPaid != null && rawPaid.isNotEmpty) { try { (jsonDecode(rawPaid) as Map).forEach((k, v) { if (v is bool) po[k as String] = v; }); } catch (_) {} }
     if (mounted) setState(() { _txns = parsed; _catB = cb; _monthBud = mb; _subs = subs; _declinedSubs = declined; _paidOverride = po; _loading = false; });
   }
 
   Future<void> _persistSubs() async {
     final pr = await SharedPreferences.getInstance();
-    await pr.setString('subscriptions', jsonEncode(_subs));
+    await pr.setString(PrefsKeys.subscriptions, jsonEncode(_subs));
   }
 
   // Approve a subscription — from a detection suggestion OR manual entry. Keyed
@@ -268,7 +269,7 @@ class _ShellState extends State<Shell> {
     HapticFeedback.lightImpact();
     _declinedSubs = {..._declinedSubs, key};
     final pr = await SharedPreferences.getInstance();
-    await pr.setStringList('declined_sub_merchants', _declinedSubs.toList());
+    await pr.setStringList(PrefsKeys.declinedSubMerchants, _declinedSubs.toList());
   }
 
   // P2.7.7 — flip the paid state for this sub's CURRENT billing cycle. We only store an
@@ -282,7 +283,7 @@ class _ShellState extends State<Shell> {
     final next = !current;
     setState(() { if (next == auto) { _paidOverride.remove(id); } else { _paidOverride[id] = next; } });
     final pr = await SharedPreferences.getInstance();
-    await pr.setString('sub_paid_override', jsonEncode(_paidOverride));
+    await pr.setString(PrefsKeys.subPaidOverride, jsonEncode(_paidOverride));
   }
 
   // P2.7.9 — id of the "Subscriptions" expense category (resolved at call-site so
@@ -1557,7 +1558,7 @@ class _Settings extends StatefulWidget {
 class _SettingsState extends State<_Settings> {
   bool _bio = false; String _name = '';
   @override void initState() { super.initState(); _lp(); }
-  Future<void> _lp() async { final p = await SharedPreferences.getInstance(); setState(() { _bio = p.getBool('biometric') ?? false; _name = p.getString('user_name') ?? ''; }); }
+  Future<void> _lp() async { final p = await SharedPreferences.getInstance(); setState(() { _bio = p.getBool(PrefsKeys.biometric) ?? false; _name = p.getString(PrefsKeys.userName) ?? ''; }); }
   @override Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return SafeArea(child: ListView(padding: const EdgeInsets.only(bottom: 120), children: [
@@ -1568,7 +1569,7 @@ class _SettingsState extends State<_Settings> {
           const SizedBox(width: 14), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(_name, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: cs.onSurface)), Text('Local account', style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.4)))]))])),
       // ── SECURITY ──
       _sec('SECURITY', Icons.shield_rounded, cs),
-      _tog('Fingerprint Lock', Icons.fingerprint_rounded, _bio, (v) async { HapticFeedback.lightImpact(); final p = await SharedPreferences.getInstance(); p.setBool('biometric', v); setState(() => _bio = v); }, cs),
+      _tog('Fingerprint Lock', Icons.fingerprint_rounded, _bio, (v) async { HapticFeedback.lightImpact(); final p = await SharedPreferences.getInstance(); p.setBool(PrefsKeys.biometric, v); setState(() => _bio = v); }, cs),
       _row('Notification Access', Icons.notifications_rounded, widget.notifOk ? 'Enabled' : 'Disabled', widget.onNotif, cs, sc: widget.notifOk ? const Color(0xFF34D399) : const Color(0xFFEF4444)),
       // ── APPEARANCE ──
       _sec('APPEARANCE', Icons.palette_rounded, cs),
@@ -1681,7 +1682,7 @@ class _AddSheetState extends State<_AddSheet> {
     super.initState();
     SharedPreferences.getInstance().then((p) {
       if (mounted) {
-        setState(() => _use24h = p.getBool('time_format_24h') ?? false);
+        setState(() => _use24h = p.getBool(PrefsKeys.time24h) ?? false);
       }
     });
   }
@@ -1759,7 +1760,7 @@ class _EditSheetState extends State<_EditSheet> {
   @override void initState() { super.initState(); _cat = widget.txn.category; _note = widget.txn.note; _nc = TextEditingController(text: _note); _date = widget.txn.date;
     _amt = widget.txn.amount == widget.txn.amount.truncateToDouble() ? widget.txn.amount.toInt().toString() : widget.txn.amount.toString();
     _ac = TextEditingController(text: _amt);
-    SharedPreferences.getInstance().then((p) { if (mounted) setState(() => _use24h = p.getBool('time_format_24h') ?? false); });
+    SharedPreferences.getInstance().then((p) { if (mounted) setState(() => _use24h = p.getBool(PrefsKeys.time24h) ?? false); });
     Db.isAutoEnabled(widget.txn.merchant).then((on) { if (mounted) setState(() => _learning = on); }); }
   @override void dispose() { _nc.dispose(); _ac.dispose(); super.dispose(); }
   @override Widget build(BuildContext context) {
