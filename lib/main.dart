@@ -1393,13 +1393,29 @@ class _StatsTab extends StatelessWidget {
             inactive.add((sub: s, last: ls));
           }
         }
-        // Price changes within the last 60 days. Stored on the sub itself
-        // (previousAmount + priceChangedAt) by _maybeUpdateSubPrice.
-        final priceChanges = subs.where((s) {
-          if (s['previousAmount'] == null) return false;
-          final ts = DateTime.tryParse((s['priceChangedAt'] as String?) ?? '');
-          return ts != null && ts.isAfter(cutoff60);
-        }).toList();
+        // Price intelligence — derived purely from transaction history. The
+        // most recent expense for the merchant is the "current" amount; we walk
+        // backwards to find the most recent earlier amount that differs by both
+        // ≥₹1 AND ≥1% (same tolerance as _maybeUpdateSubPrice, so surfaced
+        // changes mirror the ones that triggered a stored-amount update).
+        // No new storage; previousAmount/priceChangedAt on the sub are not
+        // consulted — real charges are the source of truth, not stored deltas.
+        final priceChanges = <({Map<String, dynamic> sub, double prev, double curr})>[];
+        for (final s in subs) {
+          final k = (s['key'] as String?) ?? '';
+          if (k.isEmpty) continue;
+          final hist = txns.where((t) => t.type == 'expense' && Db.merchantKey(t.merchant) == k).toList()
+            ..sort((a, b) => a.date.compareTo(b.date));
+          if (hist.length < 2) continue;
+          final curr = hist.last.amount;
+          double? prev;
+          for (int i = hist.length - 2; i >= 0; i--) {
+            final a = hist[i].amount;
+            final d = (curr - a).abs();
+            if (d >= 1 && d / curr >= 0.01) { prev = a; break; }
+          }
+          if (prev != null) priceChanges.add((sub: s, prev: prev, curr: curr));
+        }
 
         Widget metric(String label, String value) => Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(label, style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.45))),
@@ -1461,30 +1477,28 @@ class _StatsTab extends StatelessWidget {
                   ? '${unpaid.first['name']} — unpaid this cycle'
                   : '${unpaid.length} subscriptions unpaid this cycle'),
             if (priceChanges.isNotEmpty) ...[
-              // P2.7 final — give price changes their own labeled section so the
-              // insight is unmissable. Directional verb (increased/decreased)
-              // on line one; monospace amounts on line two for easy scanning.
+              // Low-density layout per spec: name on line one, amounts on line
+              // two as "₹prev → ₹curr". Up/down arrow conveys direction without
+              // adding verb text.
               Padding(padding: const EdgeInsets.only(top: 14, bottom: 2), child: Row(children: [
                 Icon(Icons.trending_up_rounded, size: 13, color: accent),
                 const SizedBox(width: 6),
                 Text('PRICE CHANGES', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: accent, letterSpacing: 1)),
               ])),
-              ...priceChanges.take(3).map((s) {
-                final prev = (s['previousAmount'] as num).toDouble();
-                final curr = (s['amount'] as num).toDouble();
-                final up = curr > prev;
+              ...priceChanges.take(3).map((pc) {
+                final up = pc.curr > pc.prev;
                 return Padding(padding: const EdgeInsets.only(top: 8), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Icon(up ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded, size: 13, color: up ? const Color(0xFFF59E0B) : const Color(0xFF22C55E)),
                   const SizedBox(width: 8),
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('${s['name']} price ${up ? 'increased' : 'decreased'}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    Text(pc.sub['name'] as String? ?? '', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface), maxLines: 1, overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 1),
-                    Text('${fmtInt(prev.round())} → ${fmtInt(curr.round())}', style: GoogleFonts.jetBrainsMono(fontSize: 11, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.6))),
+                    Text('${fmtInt(pc.prev.round())} → ${fmtInt(pc.curr.round())}', style: GoogleFonts.jetBrainsMono(fontSize: 11, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.6))),
                   ])),
                 ]));
               }),
               if (priceChanges.length > 3)
-                Padding(padding: const EdgeInsets.only(top: 6, left: 21), child: Text('+${priceChanges.length - 3} more', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.5)))),
+                Padding(padding: const EdgeInsets.only(top: 6, left: 21), child: Text('+${priceChanges.length - 3} more price changes', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.5)))),
             ],
             if (inactive.isNotEmpty)
               alertRow(Icons.nightlight_round, cs.onSurface.withOpacity(0.5),
