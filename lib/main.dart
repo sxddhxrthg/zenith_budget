@@ -227,7 +227,35 @@ class _ShellState extends State<Shell> {
       final name = nameC.text.trim();
       final amt = double.tryParse(amtC.text.replaceAll(',', '').replaceAll('₹', '').trim()) ?? 0;
       if (name.isNotEmpty && amt > 0) {
-        await _upsertSub({'key': existing?['key'] as String? ?? Db.merchantKey(name), 'name': Db.merchantDisplay(name), 'amount': amt, 'cadence': cadence, 'day': day, 'time': time, 'source': existing?['source'] ?? 'manual'});
+        // P2.7 final — when editing an existing sub, the previous _upsertSub
+        // call replaced the map outright and silently dropped previousAmount /
+        // priceChangedAt. That's why "manual ₹500 → ₹560" updated the amount
+        // but never surfaced an insight. Two cases now:
+        //   • amount meaningfully changed → record this as a price change
+        //     (same ≥1 AND ≥1% threshold as _maybeUpdateSubPrice, so manual
+        //     and auto paths produce equivalent records);
+        //   • amount unchanged → preserve any existing price-change history.
+        final next = <String, dynamic>{
+          'key': existing?['key'] as String? ?? Db.merchantKey(name),
+          'name': Db.merchantDisplay(name),
+          'amount': amt,
+          'cadence': cadence,
+          'day': day,
+          'time': time,
+          'source': existing?['source'] ?? 'manual',
+        };
+        if (existing != null) {
+          final prevAmt = (existing['amount'] as num).toDouble();
+          final d = (amt - prevAmt).abs();
+          if (prevAmt > 0 && d >= 1 && d / prevAmt >= 0.01) {
+            next['previousAmount'] = prevAmt;
+            next['priceChangedAt'] = DateTime.now().toIso8601String();
+          } else {
+            if (existing['previousAmount'] != null) next['previousAmount'] = existing['previousAmount'];
+            if (existing['priceChangedAt'] != null) next['priceChangedAt'] = existing['priceChangedAt'];
+          }
+        }
+        await _upsertSub(next);
       }
     }
   }
@@ -273,11 +301,22 @@ class _ShellState extends State<Shell> {
     if (key.isEmpty) return;
     final i = _subs.indexWhere((s) => s['key'] == key);
     if (i < 0) return;
-    final stored = (_subs[i]['amount'] as num).toDouble();
+    final sub = _subs[i];
+    // P2.7 hardening — price updates may ONLY come from a transaction inside the
+    // current billing window. This guards two cases:
+    //   1. Editing/back-dating an old transaction (would otherwise rewrite price).
+    //   2. Forward-dated entries — also out of window.
+    // A sub with missing schedule has no trustworthy window, so we skip it; the
+    // user can set the schedule and the next real charge will move the price.
+    if (sub['day'] == null || sub['time'] == null) return;
+    final now = DateTime.now();
+    final w = billingWindow(sub, now);
+    if (t.date.isBefore(w.start) || !t.date.isBefore(w.next)) return;
+    final stored = (sub['amount'] as num).toDouble();
     if (stored <= 0) return;
     final diff = (t.amount - stored).abs();
     if (diff < 1 || diff / stored < 0.01) return;
-    _subs = [..._subs]..[i] = {..._subs[i], 'amount': t.amount, 'previousAmount': stored, 'priceChangedAt': t.date.toIso8601String()};
+    _subs = [..._subs]..[i] = {...sub, 'amount': t.amount, 'previousAmount': stored, 'priceChangedAt': t.date.toIso8601String()};
     await _persistSubs();
     if (mounted) setState(() {});
   }
@@ -978,7 +1017,7 @@ class _StatsTab extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('Top merchants', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)), Text(DateFormat('MMMM').format(now), style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.3)))]),
           const SizedBox(height: 10),
-          ...top5.map((e) { final isRec = recurring.contains(e.key); return Padding(padding: const EdgeInsets.symmetric(vertical: 5), child: Row(children: [
+          ...top5.map((e) { final isRec = recurring.contains(e.key) || approvedKeys.contains(e.key); return Padding(padding: const EdgeInsets.symmetric(vertical: 5), child: Row(children: [
             Expanded(child: Row(children: [
               Flexible(child: Text(mDisp[e.key] ?? e.key, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis)),
               if (isRec) Padding(padding: const EdgeInsets.only(left: 8), child: Container(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2), decoration: BoxDecoration(borderRadius: BorderRadius.circular(6), color: accent.withOpacity(0.12)), child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.autorenew_rounded, size: 10, color: accent), const SizedBox(width: 3), Text('Recurring', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: accent))])))])),
@@ -1110,10 +1149,16 @@ class _StatsTab extends StatelessWidget {
         // ₹1800 monthly Gym charge is large but contextually normal, so we
         // exclude any merchant in the `recurring` set regardless of magnitude.
         final anomalies = monthExp
-            .where((t) =>
-                t.amount >= median * 2.5 &&
-                t.amount >= 500 &&
-                !recurring.contains(Db.merchantKey(t.merchant)))
+            .where((t) {
+              final k = Db.merchantKey(t.merchant);
+              // Recurring (auto-detected) AND approved subscriptions (user-managed)
+              // are both expected spending — never flag them as unusual, even when
+              // a sub hasn't accumulated enough detections to enter `recurring`.
+              return t.amount >= median * 2.5 &&
+                  t.amount >= 500 &&
+                  !recurring.contains(k) &&
+                  !approvedKeys.contains(k);
+            })
             .take(5)
             .toList();
         if (anomalies.isEmpty) return const SizedBox.shrink();
@@ -1189,7 +1234,10 @@ class _StatsTab extends StatelessWidget {
       Builder(builder: (_) {
         final sorted = [...subs]..sort((a, b) => (b['amount'] as num).compareTo(a['amount'] as num));
         double monthlyOf(Map<String, dynamic> s) { final a = (s['amount'] as num).toDouble(); return s['cadence'] == 'weekly' ? a * 52 / 12 : a; }
-        String schedOf(Map<String, dynamic> s) { final t = (s['time'] as String?) ?? '09:00'; final d = (s['day'] as num?)?.toInt() ?? 1; if (s['cadence'] == 'weekly') { const w = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']; return '${w[(d - 1).clamp(0, 6)]} · $t'; } return 'Day $d · $t'; }
+        // Never invent schedule. Legacy/missing values surface as a tap target
+        // ("Set schedule") that opens the existing edit sheet, where _subSheet's
+        // own defaults handle the empty state — we don't silently fabricate.
+        String schedOf(Map<String, dynamic> s) { final tRaw = s['time'] as String?; final dRaw = (s['day'] as num?)?.toInt(); if (tRaw == null || dRaw == null) return 'Set schedule'; if (s['cadence'] == 'weekly') { const w = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']; return '${w[(dRaw - 1).clamp(0, 6)]} · $tRaw'; } return 'Day $dRaw · $tRaw'; }
         final est = sorted.fold(0.0, (t, s) => t + monthlyOf(s));
         return Container(
           margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
@@ -1242,18 +1290,34 @@ class _StatsTab extends StatelessWidget {
         );
       }),
       // ── P2.7.6 Upcoming Payments — next charge per subscription, nearest first ──
+      // P2.7 final:
+      //  • "Today" detected from stored day/weekday, NOT from nextOccurrence —
+      //    so a sub still labels "Today" after its scheduled hh:mm has passed.
+      //  • Card stays fully expanded; the Stats tab itself is a ListView.
+      //  • Typography: Today → accent, Tomorrow → onSurface, future → muted.
       Builder(builder: (_) {
         if (subs.isEmpty) return const SizedBox.shrink();
         final now = DateTime.now();
-        final items = subs.map((sub) => (s: sub, next: nextOccurrence(sub, now))).toList()..sort((a, b) => a.next.compareTo(b.next));
-        // P2.7.8 fix — use DateUtils.dateOnly so we compare calendar days, not
-        // wall-clock durations. Robust against hh:mm drift in nextOccurrence.
         final today = DateUtils.dateOnly(now);
-        String whenLabel(DateTime d) {
-          final days = DateUtils.dateOnly(d).difference(today).inDays;
-          if (days == 0) return 'Today';
-          if (days == 1) return 'Tomorrow';
-          return DateFormat('d MMM').format(d);
+        bool isTodaySched(Map<String, dynamic> sub) {
+          final day = (sub['day'] as num?)?.toInt();
+          if (day == null) return false;
+          if (sub['cadence'] == 'weekly') return day.clamp(1, 7) == now.weekday;
+          final dim = DateUtils.getDaysInMonth(now.year, now.month);
+          return day.clamp(1, dim) == now.day;
+        }
+        final items = subs.map((sub) => (s: sub, next: nextOccurrence(sub, now), today: isTodaySched(sub))).toList()
+          ..sort((a, b) {
+            // Today first, then chronological — so a charged-today sub doesn't
+            // sink below subs that genuinely fire tomorrow.
+            if (a.today != b.today) return a.today ? -1 : 1;
+            return a.next.compareTo(b.next);
+          });
+        ({String text, Color color, FontWeight weight}) labelFor(({Map<String, dynamic> s, DateTime next, bool today}) it) {
+          if (it.today) return (text: 'Today', color: accent, weight: FontWeight.w700);
+          final days = DateUtils.dateOnly(it.next).difference(today).inDays;
+          if (days == 1) return (text: 'Tomorrow', color: cs.onSurface.withOpacity(0.85), weight: FontWeight.w700);
+          return (text: DateFormat('d MMM').format(it.next), color: cs.onSurface.withOpacity(0.55), weight: FontWeight.w600);
         }
         return Container(
           margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
@@ -1268,20 +1332,31 @@ class _StatsTab extends StatelessWidget {
             const SizedBox(height: 4),
             Text('Next ${items.length == 1 ? 'payment' : 'payments'}', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))),
             const SizedBox(height: 6),
-            ...items.map((it) => Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Row(children: [
-              Expanded(child: Text(it.s['name'] as String? ?? '', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis)),
-              const SizedBox(width: 8),
-              Text(fmtAmt((it.s['amount'] as num).toDouble()), style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface)),
-              const SizedBox(width: 12),
-              if (subPaidResolved(it.s, txns, paidOverride, now)) Padding(padding: const EdgeInsets.only(right: 5), child: Icon(Icons.check_circle_rounded, size: 12, color: const Color(0xFF22C55E))),
-              SizedBox(width: 66, child: Text(whenLabel(it.next), textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: accent))),
-            ]))),
+            ...items.map((it) {
+              final lbl = labelFor(it);
+              final paid = subPaidResolved(it.s, txns, paidOverride, now);
+              return Padding(padding: const EdgeInsets.symmetric(vertical: 7), child: Row(children: [
+                Expanded(child: Text(it.s['name'] as String? ?? '', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis)),
+                const SizedBox(width: 8),
+                Text(fmtAmt((it.s['amount'] as num).toDouble()), style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface)),
+                const SizedBox(width: 12),
+                if (paid) const Padding(padding: EdgeInsets.only(right: 5), child: Icon(Icons.check_circle_rounded, size: 12, color: Color(0xFF22C55E))),
+                SizedBox(width: 72, child: Text(lbl.text, textAlign: TextAlign.right, style: TextStyle(fontSize: 11.5, fontWeight: lbl.weight, color: lbl.color))),
+              ]));
+            }),
           ]),
         );
       }),
       // ── P2.7.8 Subscription Insights — derived analytics over approved subs ──
       // Reuses nextOccurrence / billingWindow / subPaidResolved. Pure read-side;
       // never writes. Each alert row is conditional — empty states stay quiet.
+      //
+      // P2.7 stabilization:
+      //  • fmtInt already prepends ₹ — never prefix a literal '₹' on top of it.
+      //  • Inactive (60–89d) and cancel-candidate (90+d) are mutually exclusive.
+      //  • Brand-new subs (no history at all) appear in neither.
+      //  • "Overdue" → "Unpaid this cycle"; no arbitrary cycle-start buffer.
+      //  • Price-change rows capped at 3, remainder aggregated.
       Builder(builder: (_) {
         if (subs.isEmpty) return const SizedBox.shrink();
         final now = DateTime.now();
@@ -1292,14 +1367,10 @@ class _StatsTab extends StatelessWidget {
         final monthly = subs.where((s) => s['cadence'] == 'monthly').toList();
         final weeklyAmt = weekly.fold(0.0, (t, s) => t + monthlyOf(s));
         final monthlyAmt = monthly.fold(0.0, (t, s) => t + monthlyOf(s));
-        // Overdue: current cycle started > 2 days ago AND not paid this cycle.
-        final overdue = subs.where((s) {
-          final w = billingWindow(s, now);
-          if (!now.isAfter(w.start.add(const Duration(days: 2)))) return false;
-          return !subPaidResolved(s, txns, paidOverride, now);
-        }).toList();
-        // Inactive: no expense from this merchant in last 60d. Uses merchantKey
-        // for canonical matching (consistent with the rest of the codebase).
+        // Unpaid this cycle: no matching expense within the current billing
+        // window. The previous 2-day buffer was arbitrary; the renamed wording
+        // ("unpaid this cycle") makes the early-cycle case self-explanatory.
+        final unpaid = subs.where((s) => !subPaidResolved(s, txns, paidOverride, now)).toList();
         final cutoff60 = now.subtract(const Duration(days: 60));
         final cutoff90 = now.subtract(const Duration(days: 90));
         DateTime? lastSeen(String key) {
@@ -1307,12 +1378,20 @@ class _StatsTab extends StatelessWidget {
           for (final t in txns) { if (t.type != 'expense') continue; if (Db.merchantKey(t.merchant) != key) continue; if (last == null || t.date.isAfter(last)) last = t.date; }
           return last;
         }
-        final inactive = <(Map<String, dynamic>, DateTime?)>[];
-        final cancelCandidates = <(Map<String, dynamic>, DateTime?)>[];
+        // Named record fields, and a non-nullable `last` — the null case is
+        // already filtered out by `if (ls == null) continue;` below.
+        final inactive = <({Map<String, dynamic> sub, DateTime last})>[];
+        final cancelCandidates = <({Map<String, dynamic> sub, DateTime last})>[];
         for (final s in subs) {
           final ls = lastSeen((s['key'] as String?) ?? '');
-          if (ls == null || ls.isBefore(cutoff60)) inactive.add((s, ls));
-          if (ls == null || ls.isBefore(cutoff90)) cancelCandidates.add((s, ls));
+          // No history at all → brand-new sub; not silent, not abandoned.
+          if (ls == null) continue;
+          // 90+ days takes precedence over 60–89; never both.
+          if (ls.isBefore(cutoff90)) {
+            cancelCandidates.add((sub: s, last: ls));
+          } else if (ls.isBefore(cutoff60)) {
+            inactive.add((sub: s, last: ls));
+          }
         }
         // Price changes within the last 60 days. Stored on the sub itself
         // (previousAmount + priceChangedAt) by _maybeUpdateSubPrice.
@@ -1324,12 +1403,36 @@ class _StatsTab extends StatelessWidget {
 
         Widget metric(String label, String value) => Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(label, style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.45))),
-          const SizedBox(height: 3),
-          Text(value, style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface)),
+          const SizedBox(height: 4),
+          Text(value, style: GoogleFonts.jetBrainsMono(fontSize: 14, fontWeight: FontWeight.w700, color: cs.onSurface), maxLines: 1, overflow: TextOverflow.ellipsis),
         ]));
-        Widget alertRow(IconData ic, Color c, String text) => Padding(padding: const EdgeInsets.only(top: 8), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Largest gets its own builder so long names ellipsize without truncating
+        // the amount — name takes Expanded, amount stays fully visible.
+        Widget largestMetric(String name, String amount) => Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Largest', style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.45))),
+          const SizedBox(height: 4),
+          Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
+            Flexible(child: Text(name, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface), maxLines: 1, overflow: TextOverflow.ellipsis)),
+            const SizedBox(width: 6),
+            Text(amount, style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface)),
+          ]),
+        ]));
+        // Cadence breakdown: count gets a large monospace number, the monthly
+        // equivalent sits below as a caption. Reads cleaner than a single line.
+        Widget cadenceMetric(String label, int count, double amt) => Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.45))),
+          const SizedBox(height: 4),
+          Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
+            Text('$count', style: GoogleFonts.jetBrainsMono(fontSize: 16, fontWeight: FontWeight.w800, color: cs.onSurface)),
+            const SizedBox(width: 5),
+            Text(count == 1 ? 'sub' : 'subs', style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.5))),
+          ]),
+          const SizedBox(height: 2),
+          Text('≈ ${fmtInt(amt.round())}/mo', style: GoogleFonts.jetBrainsMono(fontSize: 11, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.55))),
+        ]));
+        Widget alertRow(IconData ic, Color c, String text) => Padding(padding: const EdgeInsets.only(top: 10), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Icon(ic, size: 13, color: c), const SizedBox(width: 8),
-          Expanded(child: Text(text, style: TextStyle(fontSize: 11.5, color: cs.onSurface.withOpacity(0.75), height: 1.35))),
+          Expanded(child: Text(text, style: TextStyle(fontSize: 11.5, color: cs.onSurface.withOpacity(0.75), height: 1.4))),
         ]));
 
         return Container(
@@ -1342,33 +1445,56 @@ class _StatsTab extends StatelessWidget {
               const SizedBox(width: 8),
               Text('Subscription Insights', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
             ]),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             Row(children: [
-              metric('Monthly spend', '₹${fmtInt(monthlySpend.round())}'),
-              metric('Largest', '${largest.first['name']} ₹${fmtInt((largest.first['amount'] as num).round())}'),
+              metric('Monthly spend', fmtInt(monthlySpend.round())),
+              largestMetric(largest.first['name'] as String? ?? '', fmtInt((largest.first['amount'] as num).round())),
             ]),
-            const SizedBox(height: 12),
-            Row(children: [
-              metric('Weekly · ${weekly.length}', '≈ ₹${fmtInt(weeklyAmt.round())}/mo'),
-              metric('Monthly · ${monthly.length}', '≈ ₹${fmtInt(monthlyAmt.round())}/mo'),
+            const SizedBox(height: 14),
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              cadenceMetric('Weekly', weekly.length, weeklyAmt),
+              cadenceMetric('Monthly', monthly.length, monthlyAmt),
             ]),
-            if (overdue.isNotEmpty)
+            if (unpaid.isNotEmpty)
               alertRow(Icons.warning_amber_rounded, const Color(0xFFF59E0B),
-                overdue.length == 1
-                  ? '${overdue.first['name']} is overdue this cycle'
-                  : '${overdue.length} subscriptions overdue this cycle'),
-            if (priceChanges.isNotEmpty)
-              ...priceChanges.map((s) => alertRow(Icons.trending_up_rounded, accent,
-                '${s['name']} price changed  ₹${fmtInt(((s['previousAmount'] as num).toDouble()).round())} → ₹${fmtInt(((s['amount'] as num).toDouble()).round())}')),
+                unpaid.length == 1
+                  ? '${unpaid.first['name']} — unpaid this cycle'
+                  : '${unpaid.length} subscriptions unpaid this cycle'),
+            if (priceChanges.isNotEmpty) ...[
+              // P2.7 final — give price changes their own labeled section so the
+              // insight is unmissable. Directional verb (increased/decreased)
+              // on line one; monospace amounts on line two for easy scanning.
+              Padding(padding: const EdgeInsets.only(top: 14, bottom: 2), child: Row(children: [
+                Icon(Icons.trending_up_rounded, size: 13, color: accent),
+                const SizedBox(width: 6),
+                Text('PRICE CHANGES', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: accent, letterSpacing: 1)),
+              ])),
+              ...priceChanges.take(3).map((s) {
+                final prev = (s['previousAmount'] as num).toDouble();
+                final curr = (s['amount'] as num).toDouble();
+                final up = curr > prev;
+                return Padding(padding: const EdgeInsets.only(top: 8), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Icon(up ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded, size: 13, color: up ? const Color(0xFFF59E0B) : const Color(0xFF22C55E)),
+                  const SizedBox(width: 8),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('${s['name']} price ${up ? 'increased' : 'decreased'}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 1),
+                    Text('${fmtInt(prev.round())} → ${fmtInt(curr.round())}', style: GoogleFonts.jetBrainsMono(fontSize: 11, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.6))),
+                  ])),
+                ]));
+              }),
+              if (priceChanges.length > 3)
+                Padding(padding: const EdgeInsets.only(top: 6, left: 21), child: Text('+${priceChanges.length - 3} more', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.5)))),
+            ],
             if (inactive.isNotEmpty)
               alertRow(Icons.nightlight_round, cs.onSurface.withOpacity(0.5),
                 inactive.length == 1
-                  ? '${inactive.first.$1['name']} — no charges in 60 days'
+                  ? '${inactive.first.sub['name']} — no charges in 60 days'
                   : '${inactive.length} inactive (no charges in 60d)'),
             if (cancelCandidates.isNotEmpty)
               alertRow(Icons.cancel_outlined, const Color(0xFFEF4444),
                 cancelCandidates.length == 1
-                  ? 'Consider cancelling ${cancelCandidates.first.$1['name']} — silent for 90+ days'
+                  ? 'Consider cancelling ${cancelCandidates.first.sub['name']} — silent for 90+ days'
                   : '${cancelCandidates.length} candidates to cancel — silent for 90+ days'),
           ]),
         );
@@ -1547,40 +1673,51 @@ class _AddSheetState extends State<_AddSheet> {
   }
 
   @override Widget build(BuildContext context) { final cs = Theme.of(context).colorScheme; final cl = _exp ? cats : iCats; final ok = _amt.isNotEmpty && _merch.isNotEmpty && _cat.isNotEmpty;
-    return Container(constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.88), decoration: BoxDecoration(color: cs.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
-      child: ListView(padding: const EdgeInsets.fromLTRB(18, 12, 18, 34), children: [
-        Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: cs.outline.withOpacity(0.3), borderRadius: BorderRadius.circular(2)))), const SizedBox(height: 16),
-        Text('Add Transaction', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: cs.onSurface)), const SizedBox(height: 14),
-        Row(children: [
-          Expanded(child: GestureDetector(onTap: () => setState(() { _exp = true; _cat = ''; _suggested = false; }), child: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), color: _exp ? const Color(0xFFF43F5E).withOpacity(0.1) : Colors.transparent, border: Border.all(color: _exp ? const Color(0xFFF43F5E).withOpacity(0.3) : cs.outline.withOpacity(0.1))), child: Center(child: Text('💸 Expense', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: _exp ? const Color(0xFFF43F5E) : cs.onSurface.withOpacity(0.4))))))),
-          const SizedBox(width: 8),
-          Expanded(child: GestureDetector(onTap: () => setState(() { _exp = false; _cat = ''; _suggested = false; }), child: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), color: !_exp ? const Color(0xFF22C55E).withOpacity(0.1) : Colors.transparent, border: Border.all(color: !_exp ? const Color(0xFF22C55E).withOpacity(0.3) : cs.outline.withOpacity(0.1))), child: Center(child: Text('💰 Income', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: !_exp ? const Color(0xFF22C55E) : cs.onSurface.withOpacity(0.4))))))),
-        ]), const SizedBox(height: 14),
-        TextField(keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (v) => setState(() => _amt = v), style: GoogleFonts.jetBrainsMono(fontSize: 28, fontWeight: FontWeight.w800),
-          decoration: InputDecoration(hintText: '₹ 0', filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
-        const SizedBox(height: 10),
-        TextField(onChanged: (v) async { setState(() { _merch = v; _suggested = false; }); if (_exp && v.trim().length >= 2 && _cat.isEmpty) { final auto = await Db.getAutoCat(v.trim()); if (mounted && auto != null && _cat.isEmpty) setState(() { _cat = auto; _suggested = true; }); } }, decoration: InputDecoration(hintText: _exp ? 'Merchant' : 'Source', suffixIcon: _suggested ? Tooltip(message: 'Suggested from history', child: Icon(Icons.auto_awesome_rounded, size: 16, color: widget.accent)) : null, filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
-        const SizedBox(height: 10),
-        TextField(onChanged: (v) => _note = v, decoration: InputDecoration(hintText: 'Note (optional)', prefixIcon: Icon(Icons.edit_note_rounded, color: cs.onSurface.withOpacity(0.3)), filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
-        const SizedBox(height: 10),
-        Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: cs.outline.withOpacity(0.05), border: Border.all(color: cs.outline.withOpacity(0.08))), child: Row(children: [
-          Expanded(child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () async { HapticFeedback.lightImpact(); final picked = await showDatePicker(context: context, initialDate: _date, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365 * 5)), builder: (ctx, child) => Theme(data: Theme.of(ctx).copyWith(colorScheme: ColorScheme.dark(primary: widget.accent, onPrimary: Colors.white, surface: cs.surface, onSurface: cs.onSurface)), child: child!)); if (picked != null) setState(() => _date = DateTime(picked.year, picked.month, picked.day, _date.hour, _date.minute, _date.second)); }, child: Padding(padding: const EdgeInsets.fromLTRB(14, 12, 10, 12), child: Row(children: [Icon(Icons.calendar_today_rounded, size: 15, color: widget.accent), const SizedBox(width: 10), Flexible(child: Text(DateFormat('EEE, d MMM yyyy').format(_date), style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis))])))),
-          Container(width: 1, height: 22, color: cs.outline.withOpacity(0.1)),
-          GestureDetector(behavior: HitTestBehavior.opaque, onTap: _pickTime, child: Padding(padding: const EdgeInsets.fromLTRB(12, 12, 14, 12), child: Row(children: [Icon(Icons.access_time_rounded, size: 15, color: widget.accent), const SizedBox(width: 8), Text(fmtTxnTime(_date), style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: cs.onSurface))]))),
-        ])),
-        const SizedBox(height: 14),
-        GridView.builder(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, mainAxisSpacing: 7, crossAxisSpacing: 7, childAspectRatio: 1.15), itemCount: cl.length,
-          itemBuilder: (_, i) { final c = cl[i]; final sel = _cat == c.id;
-            return GestureDetector(onTap: () => setState(() { _cat = c.id; _suggested = false; }), child: Container(decoration: BoxDecoration(color: sel ? c.color.withOpacity(0.15) : cs.outline.withOpacity(0.04), borderRadius: BorderRadius.circular(10), border: Border.all(color: sel ? c.color.withOpacity(0.4) : cs.outline.withOpacity(0.08))),
-              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text(c.icon, style: const TextStyle(fontSize: 20)), const SizedBox(height: 3), Text(c.name, style: TextStyle(fontSize: 9, color: sel ? c.color : cs.onSurface.withOpacity(0.5), fontWeight: sel ? FontWeight.w700 : FontWeight.w400), textAlign: TextAlign.center, maxLines: 2)]))); }),
-        const SizedBox(height: 18),
-        ElevatedButton(onPressed: ok ? () {
-          final amount = double.tryParse(_amt.replaceAll(',','').replaceAll(' ','')) ?? 0;
-          if (amount <= 0) return;
-          widget.onAdd(Txn(id: DateTime.now().millisecondsSinceEpoch.toString(), amount: amount, merchant: _merch, category: _cat, account: 'gpay', type: _exp ? 'expense' : 'income', date: _date, note: _note));
-        } : null,
-          style: ElevatedButton.styleFrom(backgroundColor: widget.accent, foregroundColor: Colors.white, padding: const EdgeInsets.all(16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-          child: Text('Add ${_exp ? "Expense" : "Income"}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)))]));
+    // P2.7 keyboard UX — wrap with viewInsets padding so the sheet rides the
+    // keyboard, and split content/footer so the Add button stays pinned above
+    // the keyboard. maxHeight is computed against AVAILABLE space (screen minus
+    // keyboard) so the container shrinks rather than overflowing.
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final available = MediaQuery.of(context).size.height - bottomInset;
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(constraints: BoxConstraints(maxHeight: available * 0.88), decoration: BoxDecoration(color: cs.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Flexible(child: ListView(padding: const EdgeInsets.fromLTRB(18, 12, 18, 12), children: [
+            Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: cs.outline.withOpacity(0.3), borderRadius: BorderRadius.circular(2)))), const SizedBox(height: 16),
+            Text('Add Transaction', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: cs.onSurface)), const SizedBox(height: 14),
+            Row(children: [
+              Expanded(child: GestureDetector(onTap: () => setState(() { _exp = true; _cat = ''; _suggested = false; }), child: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), color: _exp ? const Color(0xFFF43F5E).withOpacity(0.1) : Colors.transparent, border: Border.all(color: _exp ? const Color(0xFFF43F5E).withOpacity(0.3) : cs.outline.withOpacity(0.1))), child: Center(child: Text('💸 Expense', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: _exp ? const Color(0xFFF43F5E) : cs.onSurface.withOpacity(0.4))))))),
+              const SizedBox(width: 8),
+              Expanded(child: GestureDetector(onTap: () => setState(() { _exp = false; _cat = ''; _suggested = false; }), child: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), color: !_exp ? const Color(0xFF22C55E).withOpacity(0.1) : Colors.transparent, border: Border.all(color: !_exp ? const Color(0xFF22C55E).withOpacity(0.3) : cs.outline.withOpacity(0.1))), child: Center(child: Text('💰 Income', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: !_exp ? const Color(0xFF22C55E) : cs.onSurface.withOpacity(0.4))))))),
+            ]), const SizedBox(height: 14),
+            TextField(keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (v) => setState(() => _amt = v), style: GoogleFonts.jetBrainsMono(fontSize: 28, fontWeight: FontWeight.w800),
+              decoration: InputDecoration(hintText: '₹ 0', filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
+            const SizedBox(height: 10),
+            TextField(onChanged: (v) async { setState(() { _merch = v; _suggested = false; }); if (_exp && v.trim().length >= 2 && _cat.isEmpty) { final auto = await Db.getAutoCat(v.trim()); if (mounted && auto != null && _cat.isEmpty) setState(() { _cat = auto; _suggested = true; }); } }, decoration: InputDecoration(hintText: _exp ? 'Merchant' : 'Source', suffixIcon: _suggested ? Tooltip(message: 'Suggested from history', child: Icon(Icons.auto_awesome_rounded, size: 16, color: widget.accent)) : null, filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
+            const SizedBox(height: 10),
+            TextField(onChanged: (v) => _note = v, decoration: InputDecoration(hintText: 'Note (optional)', prefixIcon: Icon(Icons.edit_note_rounded, color: cs.onSurface.withOpacity(0.3)), filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
+            const SizedBox(height: 10),
+            Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: cs.outline.withOpacity(0.05), border: Border.all(color: cs.outline.withOpacity(0.08))), child: Row(children: [
+              Expanded(child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () async { HapticFeedback.lightImpact(); final picked = await showDatePicker(context: context, initialDate: _date, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365 * 5)), builder: (ctx, child) => Theme(data: Theme.of(ctx).copyWith(colorScheme: ColorScheme.dark(primary: widget.accent, onPrimary: Colors.white, surface: cs.surface, onSurface: cs.onSurface)), child: child!)); if (picked != null) setState(() => _date = DateTime(picked.year, picked.month, picked.day, _date.hour, _date.minute, _date.second)); }, child: Padding(padding: const EdgeInsets.fromLTRB(14, 12, 10, 12), child: Row(children: [Icon(Icons.calendar_today_rounded, size: 15, color: widget.accent), const SizedBox(width: 10), Flexible(child: Text(DateFormat('EEE, d MMM yyyy').format(_date), style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis))])))),
+              Container(width: 1, height: 22, color: cs.outline.withOpacity(0.1)),
+              GestureDetector(behavior: HitTestBehavior.opaque, onTap: _pickTime, child: Padding(padding: const EdgeInsets.fromLTRB(12, 12, 14, 12), child: Row(children: [Icon(Icons.access_time_rounded, size: 15, color: widget.accent), const SizedBox(width: 8), Text(fmtTxnTime(_date), style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: cs.onSurface))]))),
+            ])),
+            const SizedBox(height: 14),
+            GridView.builder(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, mainAxisSpacing: 7, crossAxisSpacing: 7, childAspectRatio: 1.15), itemCount: cl.length,
+              itemBuilder: (_, i) { final c = cl[i]; final sel = _cat == c.id;
+                return GestureDetector(onTap: () => setState(() { _cat = c.id; _suggested = false; }), child: Container(decoration: BoxDecoration(color: sel ? c.color.withOpacity(0.15) : cs.outline.withOpacity(0.04), borderRadius: BorderRadius.circular(10), border: Border.all(color: sel ? c.color.withOpacity(0.4) : cs.outline.withOpacity(0.08))),
+                  child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text(c.icon, style: const TextStyle(fontSize: 20)), const SizedBox(height: 3), Text(c.name, style: TextStyle(fontSize: 9, color: sel ? c.color : cs.onSurface.withOpacity(0.5), fontWeight: sel ? FontWeight.w700 : FontWeight.w400), textAlign: TextAlign.center, maxLines: 2)]))); }),
+            const SizedBox(height: 8),
+          ])),
+          Padding(padding: const EdgeInsets.fromLTRB(18, 6, 18, 18), child: SizedBox(width: double.infinity, child: ElevatedButton(onPressed: ok ? () {
+            final amount = double.tryParse(_amt.replaceAll(',','').replaceAll(' ','')) ?? 0;
+            if (amount <= 0) return;
+            widget.onAdd(Txn(id: DateTime.now().millisecondsSinceEpoch.toString(), amount: amount, merchant: _merch, category: _cat, account: 'gpay', type: _exp ? 'expense' : 'income', date: _date, note: _note));
+          } : null,
+            style: ElevatedButton.styleFrom(backgroundColor: widget.accent, foregroundColor: Colors.white, padding: const EdgeInsets.all(16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+            child: Text('Add ${_exp ? "Expense" : "Income"}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15))))),
+        ])));
   }
   Future<void> _pickTime() async {
     HapticFeedback.lightImpact();
@@ -1613,34 +1750,43 @@ class _EditSheetState extends State<_EditSheet> {
   @override void dispose() { _nc.dispose(); _ac.dispose(); super.dispose(); }
   @override Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme; final isI = widget.txn.type == 'income'; final cl = isI ? iCats : cats;
-    return Container(constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.78), decoration: BoxDecoration(color: cs.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
-      child: ListView(padding: const EdgeInsets.fromLTRB(18, 12, 18, 34), children: [
-        Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: cs.outline.withOpacity(0.3), borderRadius: BorderRadius.circular(2)))), const SizedBox(height: 16),
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('Edit', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: cs.onSurface)),
-          Row(children: [TextButton(onPressed: () { _learning ? HapticFeedback.lightImpact() : HapticFeedback.mediumImpact(); _learning ? widget.onStopAuto() : widget.onStartAuto(); }, child: Text(_learning ? 'Stop learning' : 'Start learning again', style: TextStyle(color: _learning ? cs.onSurface.withOpacity(0.4) : const Color(0xFF22C55E), fontWeight: _learning ? FontWeight.w500 : FontWeight.w700, fontSize: 12))),
-            TextButton(onPressed: () { HapticFeedback.mediumImpact(); widget.onDelete(); }, child: const Text('Delete', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.w700, fontSize: 12)))])]),
-        const SizedBox(height: 8),
-        TextField(controller: _ac, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (v) => setState(() => _amt = v), style: GoogleFonts.jetBrainsMono(fontSize: 26, fontWeight: FontWeight.w800, color: isI ? const Color(0xFF22C55E) : cs.onSurface),
-          decoration: InputDecoration(prefixText: isI ? '+ ₹ ' : '- ₹ ', prefixStyle: GoogleFonts.jetBrainsMono(fontSize: 26, fontWeight: FontWeight.w800, color: isI ? const Color(0xFF22C55E) : cs.onSurface), filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none), contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12))),
-        const SizedBox(height: 6),
-        Text(widget.txn.merchant, style: TextStyle(fontSize: 12, color: cs.onSurface.withOpacity(0.5))),
-        const SizedBox(height: 12),
-        Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: cs.outline.withOpacity(0.05), border: Border.all(color: cs.outline.withOpacity(0.08))), child: Row(children: [
-          Expanded(child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () async { HapticFeedback.lightImpact(); final picked = await showDatePicker(context: context, initialDate: _date, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365 * 5)), builder: (ctx, child) => Theme(data: Theme.of(ctx).copyWith(colorScheme: ColorScheme.dark(primary: widget.accent, onPrimary: Colors.white, surface: cs.surface, onSurface: cs.onSurface)), child: child!)); if (picked != null) setState(() => _date = DateTime(picked.year, picked.month, picked.day, _date.hour, _date.minute, _date.second)); }, child: Padding(padding: const EdgeInsets.fromLTRB(14, 12, 10, 12), child: Row(children: [Icon(Icons.calendar_today_rounded, size: 15, color: widget.accent), const SizedBox(width: 10), Flexible(child: Text(DateFormat('EEE, d MMM yyyy').format(_date), style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis))])))),
-          Container(width: 1, height: 22, color: cs.outline.withOpacity(0.1)),
-          GestureDetector(behavior: HitTestBehavior.opaque, onTap: _pickTime, child: Padding(padding: const EdgeInsets.fromLTRB(12, 12, 14, 12), child: Row(children: [Icon(Icons.access_time_rounded, size: 15, color: widget.accent), const SizedBox(width: 8), Text(fmtTxnTime(_date), style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: cs.onSurface))]))),
-        ])),
-        const SizedBox(height: 12),
-        TextField(controller: _nc, onChanged: (v) => _note = v, decoration: InputDecoration(hintText: 'Note', prefixIcon: Icon(Icons.edit_note_rounded, color: cs.onSurface.withOpacity(0.3)), filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
-        const SizedBox(height: 12),
-        GridView.builder(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, mainAxisSpacing: 7, crossAxisSpacing: 7, childAspectRatio: 1.15), itemCount: cl.length,
-          itemBuilder: (_, i) { final c = cl[i]; final sel = _cat == c.id;
-            return GestureDetector(onTap: () => setState(() => _cat = c.id), child: Container(decoration: BoxDecoration(color: sel ? c.color.withOpacity(0.15) : cs.outline.withOpacity(0.04), borderRadius: BorderRadius.circular(10), border: Border.all(color: sel ? c.color.withOpacity(0.4) : cs.outline.withOpacity(0.08))),
-              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text(c.icon, style: const TextStyle(fontSize: 20)), const SizedBox(height: 3), Text(c.name, style: TextStyle(fontSize: 9, color: sel ? c.color : cs.onSurface.withOpacity(0.5), fontWeight: sel ? FontWeight.w700 : FontWeight.w400), textAlign: TextAlign.center, maxLines: 2)]))); }),
-        const SizedBox(height: 16),
-        ElevatedButton(onPressed: () { final amount = double.tryParse(_amt.replaceAll(',', '').replaceAll(' ', '')) ?? widget.txn.amount; if (amount <= 0) return; widget.onSave(Txn(id: widget.txn.id, amount: amount, merchant: widget.txn.merchant, category: _cat, account: widget.txn.account, type: widget.txn.type, date: _date, note: _note)); },
-          style: ElevatedButton.styleFrom(backgroundColor: widget.accent, foregroundColor: Colors.white, padding: const EdgeInsets.all(16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-          child: const Text('Save Changes', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)))]));
+    // P2.7 keyboard UX — mirror _AddSheet: viewInsets padding outside, content
+    // scrolls in a Flexible ListView, Save Changes pinned as a fixed footer.
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final available = MediaQuery.of(context).size.height - bottomInset;
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(constraints: BoxConstraints(maxHeight: available * 0.86), decoration: BoxDecoration(color: cs.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Flexible(child: ListView(padding: const EdgeInsets.fromLTRB(18, 12, 18, 12), children: [
+            Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: cs.outline.withOpacity(0.3), borderRadius: BorderRadius.circular(2)))), const SizedBox(height: 16),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('Edit', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: cs.onSurface)),
+              Row(children: [TextButton(onPressed: () { _learning ? HapticFeedback.lightImpact() : HapticFeedback.mediumImpact(); _learning ? widget.onStopAuto() : widget.onStartAuto(); }, child: Text(_learning ? 'Stop learning' : 'Start learning again', style: TextStyle(color: _learning ? cs.onSurface.withOpacity(0.4) : const Color(0xFF22C55E), fontWeight: _learning ? FontWeight.w500 : FontWeight.w700, fontSize: 12))),
+                TextButton(onPressed: () { HapticFeedback.mediumImpact(); widget.onDelete(); }, child: const Text('Delete', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.w700, fontSize: 12)))])]),
+            const SizedBox(height: 8),
+            TextField(controller: _ac, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (v) => setState(() => _amt = v), style: GoogleFonts.jetBrainsMono(fontSize: 26, fontWeight: FontWeight.w800, color: isI ? const Color(0xFF22C55E) : cs.onSurface),
+              decoration: InputDecoration(prefixText: isI ? '+ ₹ ' : '- ₹ ', prefixStyle: GoogleFonts.jetBrainsMono(fontSize: 26, fontWeight: FontWeight.w800, color: isI ? const Color(0xFF22C55E) : cs.onSurface), filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none), contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12))),
+            const SizedBox(height: 6),
+            Text(widget.txn.merchant, style: TextStyle(fontSize: 12, color: cs.onSurface.withOpacity(0.5))),
+            const SizedBox(height: 12),
+            Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: cs.outline.withOpacity(0.05), border: Border.all(color: cs.outline.withOpacity(0.08))), child: Row(children: [
+              Expanded(child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () async { HapticFeedback.lightImpact(); final picked = await showDatePicker(context: context, initialDate: _date, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365 * 5)), builder: (ctx, child) => Theme(data: Theme.of(ctx).copyWith(colorScheme: ColorScheme.dark(primary: widget.accent, onPrimary: Colors.white, surface: cs.surface, onSurface: cs.onSurface)), child: child!)); if (picked != null) setState(() => _date = DateTime(picked.year, picked.month, picked.day, _date.hour, _date.minute, _date.second)); }, child: Padding(padding: const EdgeInsets.fromLTRB(14, 12, 10, 12), child: Row(children: [Icon(Icons.calendar_today_rounded, size: 15, color: widget.accent), const SizedBox(width: 10), Flexible(child: Text(DateFormat('EEE, d MMM yyyy').format(_date), style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: cs.onSurface), overflow: TextOverflow.ellipsis))])))),
+              Container(width: 1, height: 22, color: cs.outline.withOpacity(0.1)),
+              GestureDetector(behavior: HitTestBehavior.opaque, onTap: _pickTime, child: Padding(padding: const EdgeInsets.fromLTRB(12, 12, 14, 12), child: Row(children: [Icon(Icons.access_time_rounded, size: 15, color: widget.accent), const SizedBox(width: 8), Text(fmtTxnTime(_date), style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: cs.onSurface))]))),
+            ])),
+            const SizedBox(height: 12),
+            TextField(controller: _nc, onChanged: (v) => _note = v, decoration: InputDecoration(hintText: 'Note', prefixIcon: Icon(Icons.edit_note_rounded, color: cs.onSurface.withOpacity(0.3)), filled: true, fillColor: cs.outline.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
+            const SizedBox(height: 12),
+            GridView.builder(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, mainAxisSpacing: 7, crossAxisSpacing: 7, childAspectRatio: 1.15), itemCount: cl.length,
+              itemBuilder: (_, i) { final c = cl[i]; final sel = _cat == c.id;
+                return GestureDetector(onTap: () => setState(() => _cat = c.id), child: Container(decoration: BoxDecoration(color: sel ? c.color.withOpacity(0.15) : cs.outline.withOpacity(0.04), borderRadius: BorderRadius.circular(10), border: Border.all(color: sel ? c.color.withOpacity(0.4) : cs.outline.withOpacity(0.08))),
+                  child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text(c.icon, style: const TextStyle(fontSize: 20)), const SizedBox(height: 3), Text(c.name, style: TextStyle(fontSize: 9, color: sel ? c.color : cs.onSurface.withOpacity(0.5), fontWeight: sel ? FontWeight.w700 : FontWeight.w400), textAlign: TextAlign.center, maxLines: 2)]))); }),
+            const SizedBox(height: 6),
+          ])),
+          Padding(padding: const EdgeInsets.fromLTRB(18, 6, 18, 18), child: SizedBox(width: double.infinity, child: ElevatedButton(onPressed: () { final amount = double.tryParse(_amt.replaceAll(',', '').replaceAll(' ', '')) ?? widget.txn.amount; if (amount <= 0) return; widget.onSave(Txn(id: widget.txn.id, amount: amount, merchant: widget.txn.merchant, category: _cat, account: widget.txn.account, type: widget.txn.type, date: _date, note: _note)); },
+            style: ElevatedButton.styleFrom(backgroundColor: widget.accent, foregroundColor: Colors.white, padding: const EdgeInsets.all(16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+            child: const Text('Save Changes', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))))),
+        ])));
   }
   Future<void> _pickTime() async {
     HapticFeedback.lightImpact();
