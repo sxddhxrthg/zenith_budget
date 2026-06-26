@@ -1335,7 +1335,7 @@ class _StatsTab extends StatelessWidget {
                 ]));
               }),
               if (priceChanges.length > 3)
-                Padding(padding: const EdgeInsets.only(top: 6, left: 21), child: Text('+${priceChanges.length - 3} more price changes', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.5)))),
+                Padding(padding: const EdgeInsets.only(top: 7, left: 21), child: Text('+${priceChanges.length - 3} more price changes', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.5)))),
             ],
             if (inactive.isNotEmpty)
               alertRow(Icons.nightlight_round, cs.onSurface.withOpacity(0.5),
