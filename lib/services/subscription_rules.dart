@@ -11,6 +11,16 @@ import 'package:intl/intl.dart' hide TextDirection;
 import '../models/transaction.dart';
 import '../services/db_service.dart';
 
+// P3.1.E — monthly-equivalent spend for a subscription. Weekly subs are
+// normalized to a monthly figure via 52 weeks / 12 months; monthly subs
+// pass through unchanged. Pure: depends only on amount + cadence; identity
+// fields (key, day, time) are irrelevant. Mirrors the duplicated inline
+// helper previously defined twice in main.dart (Stats card + Insights card).
+double monthlyEquivalent(Map<String, dynamic> sub) {
+  final a = (sub['amount'] as num).toDouble();
+  return sub['cadence'] == 'weekly' ? a * 52 / 12 : a;
+}
+
 // P2.7.6 — next billing occurrence for a subscription (weekly/monthly only).
 // Pure: derived from stored cadence/day/time. Identity is merchant+schedule; amount
 // is irrelevant here. Monthly clamps day to the month length (e.g. day 31 in Feb).

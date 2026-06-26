@@ -1164,12 +1164,11 @@ class _StatsTab extends StatelessWidget {
       // ── P2.7.1/3 Subscriptions — ONLY user-approved subs (auto or manual) ──
       Builder(builder: (_) {
         final sorted = [...subs]..sort((a, b) => (b['amount'] as num).compareTo(a['amount'] as num));
-        double monthlyOf(Map<String, dynamic> s) { final a = (s['amount'] as num).toDouble(); return s['cadence'] == 'weekly' ? a * 52 / 12 : a; }
         // Never invent schedule. Legacy/missing values surface as a tap target
         // ("Set schedule") that opens the existing edit sheet, where _subSheet's
         // own defaults handle the empty state — we don't silently fabricate.
         String schedOf(Map<String, dynamic> s) { final tRaw = s['time'] as String?; final dRaw = (s['day'] as num?)?.toInt(); if (tRaw == null || dRaw == null) return 'Set schedule'; if (s['cadence'] == 'weekly') { const w = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']; return '${w[(dRaw - 1).clamp(0, 6)]} · $tRaw'; } return 'Day $dRaw · $tRaw'; }
-        final est = sorted.fold(0.0, (t, s) => t + monthlyOf(s));
+        final est = sorted.fold(0.0, (t, s) => t + monthlyEquivalent(s));
         return Container(
           margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
           padding: const EdgeInsets.all(14),
@@ -1291,13 +1290,12 @@ class _StatsTab extends StatelessWidget {
       Builder(builder: (_) {
         if (subs.isEmpty) return const SizedBox.shrink();
         final now = DateTime.now();
-        double monthlyOf(Map<String, dynamic> s) { final a = (s['amount'] as num).toDouble(); return s['cadence'] == 'weekly' ? a * 52 / 12 : a; }
-        final monthlySpend = subs.fold(0.0, (t, s) => t + monthlyOf(s));
+        final monthlySpend = subs.fold(0.0, (t, s) => t + monthlyEquivalent(s));
         final largest = [...subs]..sort((a, b) => (b['amount'] as num).compareTo(a['amount'] as num));
         final weekly = subs.where((s) => s['cadence'] == 'weekly').toList();
         final monthly = subs.where((s) => s['cadence'] == 'monthly').toList();
-        final weeklyAmt = weekly.fold(0.0, (t, s) => t + monthlyOf(s));
-        final monthlyAmt = monthly.fold(0.0, (t, s) => t + monthlyOf(s));
+        final weeklyAmt = weekly.fold(0.0, (t, s) => t + monthlyEquivalent(s));
+        final monthlyAmt = monthly.fold(0.0, (t, s) => t + monthlyEquivalent(s));
         // Unpaid this cycle: no matching expense within the current billing
         // window. The previous 2-day buffer was arbitrary; the renamed wording
         // ("unpaid this cycle") makes the early-cycle case self-explanatory.
