@@ -22,6 +22,7 @@ import 'services/settings_service.dart';
 import 'services/notification_service.dart';
 import 'utils/prefs_keys.dart';
 import 'services/subscription_rules.dart';
+import 'services/subscription_service.dart';
 
 
 void main() async {
@@ -288,10 +289,9 @@ class _ShellState extends State<Shell> {
     await pr.setString(PrefsKeys.subPaidOverride, jsonEncode(_paidOverride));
   }
 
-  // P2.7.9 — id of the "Subscriptions" expense category (resolved at call-site so
-  // a rename anywhere in models/category.dart can't desync this). Returns '' if
-  // the category was removed; callers must handle that.
-  String _subsCatId() { try { return cats.firstWhere((c) => c.name.toLowerCase() == 'subscriptions').id; } catch (_) { return ''; } }
+  // P3.1.C — moved to services/subscription_service.dart (subsCatId). Thin
+  // forwarder preserves call sites; resolves against the live `cats` field.
+  String _subsCatId() => subsCatId(cats);
 
   // P2.7.9 — price intelligence. After an expense lands, if it matches an
   // approved subscription and the amount diverges meaningfully from the stored
@@ -324,20 +324,9 @@ class _ShellState extends State<Shell> {
     if (mounted) setState(() {});
   }
 
-  // P2.7.5.1 — heuristic confidence for entry-time suggestions (no DB, history-based):
-  //   low  (food delivery / rides / marketplaces / eateries) → never ask here; P2.7.2 handles it.
-  //   high (clear subscription brands)                        → ask on the first charge.
-  //   medium (anything else)                                  → ask only once a second charge
-  //                                                              of a near-equal amount is seen.
-  // Deliberately conservative: missing a few subscriptions beats nagging the user.
-  bool _entryConfident(Txn t, String key) {
-    const low = ['swiggy', 'zomato', 'uber', 'ola', 'rapido', 'amazon', 'flipkart', 'pizza', 'domino', 'kfc', 'mcdonald', 'burger', 'blinkit', 'zepto', 'instamart', 'bigbasket', 'dunzo', 'myntra', 'meesho', 'ajio', 'starbucks', 'cafe', 'restaurant', 'petrol', 'fuel'];
-    const high = ['netflix', 'spotify', 'google one', 'youtube premium', 'youtube music', 'apple music', 'apple tv', 'icloud', 'chatgpt', 'openai', 'hotstar', 'audible', 'gym'];
-    if (low.any((k) => key.contains(k))) return false;
-    if (high.any((k) => key.contains(k))) return true;
-    final tol = (t.amount * 0.15).clamp(1.0, double.infinity);
-    return _txns.any((x) => x.type == 'expense' && x.id != t.id && Db.merchantKey(x.merchant) == key && (x.amount - t.amount).abs() <= tol);
-  }
+  // P3.1.C — moved to services/subscription_service.dart (entryConfident).
+  // Thin forwarder preserves call sites; passes live _txns into the pure helper.
+  bool _entryConfident(Txn t, String key) => entryConfident(t, key, _txns);
 
   // P2.7.5 — entry-time subscription suggestion. Fires after an expense is logged;
   // non-blocking (the txn is already saved), one at a time, never auto-decides cadence.
