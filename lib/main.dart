@@ -19,6 +19,7 @@ import 'widgets/painters.dart';
 import 'widgets/transaction_tile.dart';
 import 'widgets/budget_card.dart';
 import 'widgets/empty_state.dart';
+import 'widgets/floating_nav.dart';
 import 'services/db_service.dart';
 import 'services/settings_service.dart';
 import 'services/notification_service.dart';
@@ -536,13 +537,7 @@ class _ShellState extends State<Shell> {
       Positioned(right: 20, bottom: bottomPad + 76, child: GestureDetector(onTap: () { HapticFeedback.lightImpact(); _showAdd(); },
         child: Container(width: 52, height: 52, decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), color: widget.accent, boxShadow: [BoxShadow(color: widget.accent.withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 4))]),
           child: const Icon(Icons.add_rounded, color: Colors.white, size: 24)))),
-      Positioned(left: 20, right: 20, bottom: bottomPad + 12, child: Container(decoration: BoxDecoration(color: cs.surface, borderRadius: BorderRadius.circular(28), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 24, offset: const Offset(0, 4))]),
-        child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10), child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: List.generate(5, (i) { final icons = [Icons.home_rounded, Icons.swap_vert_rounded, Icons.pie_chart_rounded, Icons.analytics_rounded, Icons.settings_rounded]; final sel = _tab == i;
-            return GestureDetector(onTap: () { HapticFeedback.lightImpact(); setState(() => _tab = i); }, behavior: HitTestBehavior.opaque,
-              child: AnimatedContainer(duration: const Duration(milliseconds: 200), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), color: sel ? widget.accent.withOpacity(0.12) : Colors.transparent),
-                child: Icon(icons[i], size: 24, color: sel ? widget.accent : cs.onSurface.withOpacity(0.35)))); })))))]));
+      Positioned(left: 20, right: 20, bottom: bottomPad + 12, child: FloatingNav(currentIndex: _tab, accent: widget.accent, onSelect: (i) => setState(() => _tab = i)))]));
   }
 }
 
