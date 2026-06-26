@@ -18,6 +18,7 @@ import 'theme/app_constants.dart';
 import 'widgets/painters.dart';
 import 'widgets/transaction_tile.dart';
 import 'widgets/budget_card.dart';
+import 'widgets/empty_state.dart';
 import 'services/db_service.dart';
 import 'services/settings_service.dart';
 import 'services/notification_service.dart';
@@ -576,12 +577,10 @@ class _Home extends StatelessWidget {
       if (txns.isNotEmpty) Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(12), decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: accent.withOpacity(0.06)),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('💡', style: TextStyle(fontSize: 14)), const SizedBox(width: 8), Expanded(child: Text(_ins(), style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.65), height: 1.4)))])),
       ...buildGrouped(txns, cs, onTap, limit: 20, onDelete: onDelete),
-      if (txns.isEmpty) Padding(padding: const EdgeInsets.fromLTRB(32, 48, 32, 32), child: Column(children: [
-        Icon(Icons.receipt_long_rounded, size: 48, color: cs.onSurface.withOpacity(0.12)),
-        const SizedBox(height: 16),
-        Text('No transactions yet', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.4))),
-        const SizedBox(height: 6),
-        Text('Your spending will appear here\nautomatically from GPay', textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.25)))])),
+if (txns.isEmpty) const EmptyState(
+        icon: Icons.receipt_long_rounded,
+        title: 'No transactions yet',
+        subtitle: 'Your spending will appear here\nautomatically from GPay'),
     ]));
   }
 
@@ -680,12 +679,10 @@ class _ActivityState extends State<_Activity> {
         _chip(cs, _range == null ? 'Date' : '${DateFormat('d MMM').format(_range!.start)} – ${DateFormat('d MMM').format(_range!.end)}', _range != null, Icons.calendar_today_rounded, _pickRange)])),
       const SizedBox(height: 6),
       Expanded(child: filtered.isEmpty
-        ? Padding(padding: const EdgeInsets.fromLTRB(32, 48, 32, 32), child: Column(children: [
-            Icon(_hasFilter ? Icons.search_off_rounded : Icons.swap_vert_rounded, size: 48, color: cs.onSurface.withOpacity(0.12)),
-            const SizedBox(height: 16),
-            Text(_hasFilter ? 'No matches' : 'No activity yet', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.4))),
-            const SizedBox(height: 6),
-            Text(_hasFilter ? 'Try a different search or clear filters' : 'Transactions will show up here\nas you spend', textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: cs.onSurface.withOpacity(0.25)))]))
+        ? EmptyState(
+            icon: _hasFilter ? Icons.search_off_rounded : Icons.swap_vert_rounded,
+            title: _hasFilter ? 'No matches' : 'No activity yet',
+            subtitle: _hasFilter ? 'Try a different search or clear filters' : 'Transactions will show up here\nas you spend')
         : ListView(padding: const EdgeInsets.only(bottom: 120), children: buildGrouped(filtered, cs, widget.onTap, limit: 500, onDelete: widget.onDelete)))]));
   }
 }
