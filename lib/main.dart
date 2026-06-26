@@ -23,6 +23,8 @@ import 'services/notification_service.dart';
 import 'utils/prefs_keys.dart';
 import 'services/subscription_rules.dart';
 import 'services/subscription_service.dart';
+import 'services/budget_service.dart';
+import 'services/insights_service.dart';
 
 
 void main() async {
@@ -512,8 +514,8 @@ class _ShellState extends State<Shell> {
   // balance, projections, and AI insights all assume month semantics.
   // Historical transactions remain visible in Activity but never
   // contribute to other months' analytics.
-  double get tExp { final n = DateTime.now(); return _txns.where((t) => t.type == 'expense' && t.date.year == n.year && t.date.month == n.month).fold(0.0, (s, t) => s + t.amount); }
-  double get tInc { final n = DateTime.now(); return _txns.where((t) => t.type == 'income' && t.date.year == n.year && t.date.month == n.month).fold(0.0, (s, t) => s + t.amount); }
+  double get tExp => monthlyTotal(_txns, 'expense', DateTime.now());
+  double get tInc => monthlyTotal(_txns, 'income', DateTime.now());
 
   @override void dispose() { _sub?.cancel(); super.dispose(); }
   @override Widget build(BuildContext context) {
@@ -622,17 +624,8 @@ class _Home extends StatelessWidget {
 
   Widget _kv(String l, String v, Color c, ColorScheme cs) => Padding(padding: const EdgeInsets.only(bottom: 2), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(l, style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))), Text(v, style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: c))]));
   Widget _ms(String l, String v, Color c, ColorScheme cs) => Column(crossAxisAlignment: CrossAxisAlignment.end, children: [Text(l, style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.35))), Text(v, style: GoogleFonts.jetBrainsMono(fontSize: 13, fontWeight: FontWeight.w700, color: c))]);
-  String _ins() {
-    final now = DateTime.now(); final dp = now.day; final dl = DateUtils.getDaysInMonth(now.year, now.month) - dp;
-    final da = dp > 0 && tExp > 0 ? tExp / dp : 0.0;
-    final top = cats.map((c) => MapEntry(c, txns.where((t) => t.type == 'expense' && t.date.year == now.year && t.date.month == now.month && t.category == c.id).fold(0.0, (s, t) => s + t.amount))).where((e) => e.value > 0).toList()..sort((a, b) => b.value.compareTo(a.value));
-    if (top.isEmpty) return 'No spending this month yet. Your insights will appear as you spend.';
-    final p = <String>[];
-    if (monthBud > 0) { final proj = da * DateUtils.getDaysInMonth(now.year, now.month); p.add(proj > monthBud * 1.1 ? 'At this pace: ${fmtAmt(proj)} — ${((proj / monthBud - 1) * 100).round()}% over budget.' : 'On track — ${fmtAmt(monthBud - tExp)} left, $dl days.'); }
-    p.add('Top: ${top.first.key.icon} ${top.first.key.name} ${fmtAmt(top.first.value)}.');
-    if (da > 0) p.add('Avg: ${fmtAmt(da)}/day.');
-    return p.join(' ');
-  }
+  // P3.1.D — body extracted to services/insights_service.dart::homeInsight.
+  String _ins() => homeInsight(txns: txns, cats: cats, tExp: tExp, monthBud: monthBud);
 }
 
 // ═══ ACTIVITY ═══
@@ -1458,31 +1451,8 @@ class _StatsTab extends StatelessWidget {
     ]));
   }
 
-  String _ai() {
-    final now = DateTime.now(); final dim = DateUtils.getDaysInMonth(now.year, now.month);
-    final dp = now.day; final dl = dim - dp;
-    final da = dp > 0 && tExp > 0 ? tExp / dp : 0.0; final proj = da * dim;
-    if (tExp == 0) return 'No expenses this month yet. Add transactions to see spending insights.';
-    final ec = txns.where((t) => t.type == 'expense' && t.date.year == now.year && t.date.month == now.month).length;
-    final mExp = txns.where((t) => t.type == 'expense' && t.date.month == now.month && t.date.year == now.year).toList();
-    final p = <String>[];
-    if (ec > 0) p.add('$ec expense${ec == 1 ? '' : 's'} this month, avg ${fmtAmt(tExp / ec)} each.');
-    if (monthBud > 0) p.add(proj > monthBud ? '⚠️ Projected ${fmtAmt(proj)} exceeds ${fmtInt(monthBud)} budget.' : '✅ On track: ${fmtAmt(proj)} projected of ${fmtInt(monthBud)}.');
-    if (tInc > 0) p.add('Savings: ${((tInc - tExp) / tInc * 100).round()}%.');
-    if (dl > 0 && monthBud > 0 && monthBud > tExp) p.add('${fmtAmt((monthBud - tExp) / dl)}/day for remaining $dl days.');
-    if (mExp.isNotEmpty) {
-      final big = mExp.reduce((a, b) => a.amount > b.amount ? a : b);
-      p.add('💸 Biggest this month: ${fmtAmt(big.amount)} on ${DateFormat('MMM d').format(big.date)}.');
-      final w = List<double>.filled(7, 0); for (var t in mExp) w[t.date.weekday - 1] += t.amount;
-      final mx = w.reduce(math.max);
-      if (mx > 0) { final pk = w.indexOf(mx); const names = ['Mondays','Tuesdays','Wednesdays','Thursdays','Fridays','Saturdays','Sundays']; p.add('📅 You spend most on ${names[pk]}.'); }
-    }
-    final wkAgo = now.subtract(const Duration(days: 7)); final twoWkAgo = now.subtract(const Duration(days: 14));
-    final tw = txns.where((t) => t.type == 'expense' && t.date.isAfter(wkAgo)).fold(0.0, (s, t) => s + t.amount);
-    final pw = txns.where((t) => t.type == 'expense' && t.date.isAfter(twoWkAgo) && t.date.isBefore(wkAgo)).fold(0.0, (s, t) => s + t.amount);
-    if (pw > 0) { final d = ((tw - pw) / pw * 100).round(); p.add('${d > 0 ? '📈' : '📉'} This week ${d > 0 ? 'up' : 'down'} ${d.abs()}% vs last week.'); }
-    return p.join('\n');
-  }
+  // P3.1.D — body extracted to services/insights_service.dart::statsInsight.
+  String _ai() => statsInsight(txns: txns, tExp: tExp, tInc: tInc, monthBud: monthBud);
 }
 
 // ═══ SETTINGS ═══
