@@ -20,6 +20,7 @@ import 'widgets/transaction_tile.dart';
 import 'widgets/budget_card.dart';
 import 'widgets/empty_state.dart';
 import 'widgets/floating_nav.dart';
+import 'widgets/insight_card.dart';
 import 'services/db_service.dart';
 import 'services/settings_service.dart';
 import 'services/notification_service.dart';
@@ -569,8 +570,7 @@ class _Home extends StatelessWidget {
         child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Balance', style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.4))), Text(fmtAmt(bal), style: GoogleFonts.jetBrainsMono(fontSize: 22, fontWeight: FontWeight.w800, color: bal >= 0 ? cs.onSurface : const Color(0xFFF43F5E)))]),
           Row(children: [_ms('In', '+${fmtAmt(tInc)}', const Color(0xFF22C55E), cs), const SizedBox(width: 14), _ms('Out', '-${fmtAmt(tExp)}', const Color(0xFFF43F5E), cs)])])),
-      if (txns.isNotEmpty) Container(margin: const EdgeInsets.fromLTRB(16, 10, 16, 0), padding: const EdgeInsets.all(12), decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: accent.withOpacity(0.06)),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('💡', style: TextStyle(fontSize: 14)), const SizedBox(width: 8), Expanded(child: Text(_ins(), style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.65), height: 1.4)))])),
+      if (txns.isNotEmpty) InsightCard(accent: accent, emoji: '💡', body: _ins()),
       ...buildGrouped(txns, cs, onTap, limit: 20, onDelete: onDelete),
 if (txns.isEmpty) const EmptyState(
         icon: Icons.receipt_long_rounded,
@@ -1350,10 +1350,7 @@ class _StatsTab extends StatelessWidget {
           ]),
         );
       }),
-      if (txns.isNotEmpty) Container(margin: const EdgeInsets.fromLTRB(16, 14, 16, 0), padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: accent.withOpacity(0.06)),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [const Text('🧠', style: TextStyle(fontSize: 16)), const SizedBox(width: 8), Text('AI Overview', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: accent))]), const SizedBox(height: 8),
-          Text(_ai(), style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.65), height: 1.5))])),
+      if (txns.isNotEmpty) InsightCard(accent: accent, emoji: '🧠', title: 'AI Overview', body: _ai()),
     ]));
   }
 
